@@ -1,0 +1,41 @@
+#!/usr/bin/make -f
+
+%:
+	dh $@ --with=bash-completion
+
+override_dh_auto_build:
+	#Kubernetes compilation
+	make
+	#Create kubectl bash completion
+	mkdir -p _output/bin/bash-completion
+	_output/bin/kubectl completion bash > _output/bin/bash-completion/kubectl
+	#Create kubectl zsh completion
+	mkdir -p _output/bin/zsh-completion
+	_output/bin/kubectl completion zsh > _output/bin/zsh-completion/_kubectl
+	#Create manpages
+	mkdir -p _output/bin/man
+	_output/bin/genman _output/bin/man/ kubeadm
+	_output/bin/genman _output/bin/man/ kube-apiserver
+	_output/bin/genman _output/bin/man/ kube-controller-manager
+	_output/bin/genman _output/bin/man/ kubectl
+	_output/bin/genman _output/bin/man/ kubelet
+	_output/bin/genman _output/bin/man/ kube-proxy
+	_output/bin/genman _output/bin/man/ kube-scheduler
+	#Create kubectl docs
+	mkdir -p _output/bin/docs
+	_output/bin/gendocs _output/bin/docs/
+	#Create other binaries docs
+	mkdir -p _output/bin/kubedocs
+	_output/bin/genkubedocs _output/bin/kubedocs/ kubeadm
+	_output/bin/genkubedocs _output/bin/kubedocs/ kube-apiserver
+	_output/bin/genkubedocs _output/bin/kubedocs/ kube-controller-manager
+	_output/bin/genkubedocs _output/bin/kubedocs/ kubelet
+	_output/bin/genkubedocs _output/bin/kubedocs/ kube-proxy
+	_output/bin/genkubedocs _output/bin/kubedocs/ kube-scheduler
+
+override_dh_installchangelogs:
+	dh_installchangelogs -X CHANGELOG.md CHANGELOG/CHANGELOG-*.md
+
+override_dh_dwz:
+
+override_dh_auto_test:

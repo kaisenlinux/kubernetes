@@ -1,0 +1,4 @@
+_output/bin/kubedocs/kube-apiserver*
+_output/bin/kubedocs/kube-scheduler*
+_output/bin/kubedocs/kube-controller-manager*
+_output/bin/kubedocs/kubeadm*

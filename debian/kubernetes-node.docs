@@ -1,0 +1,3 @@
+_output/bin/kubedocs/kubelet*
+_output/bin/kubedocs/kube-proxy*
+_output/bin/kubedocs/kubeadm*

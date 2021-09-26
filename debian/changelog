@@ -1,0 +1,5 @@
+kubernetes (1.22.2-1kaisen) kaisen-packages; urgency=medium
+
+  * First packaging for Kaisen Linux
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sat, 25 Sep 2021 01:31:56 +0200

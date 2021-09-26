@@ -1,0 +1,39 @@
+Source: kubernetes
+Section: admin
+Priority: optional
+Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
+Build-Depends: debhelper-compat (= 13),
+	       golang-go (>= 1.16),
+	       dh-golang,
+	       bash-completion,
+Standards-Version: 4.6.0
+Homepage: https://kubernetes.io
+Vcs-Browser: https://gitlab.com/kaisenlinux/packages/kubernetes
+Vcs-Git: https://gitlab.com/kaisenlinux/packages/kubernetes.git
+XS-Go-Import-Path: github.com/kubernetes/kubernetes
+
+Package: kubernetes-client
+Architecture: amd64 i386 armel armhf arm64
+Depends: ${shlibs:Depends},
+	 ${misc:Depends},
+	 golang-go (>= 1.16),
+Suggests: k9s,
+	  helm,
+Description: Production-Grade Container Scheduling and Management (client binaries)
+
+Package: kubernetes-node
+Architecture: amd64 i386 armel armhf arm64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         golang-go (>= 1.16),
+Replaces: kubernetes-master
+Description: Production-Grade Container Scheduling and Management (node binaries)
+
+Package: kubernetes-master
+Architecture: amd64 i386 armel armhf arm64
+Depends: ${shlibs:Depends},
+         ${misc:Depends},
+         golang-go (>= 1.16),
+	 etcd-server,
+Replaces: kubernetes-node
+Description: Production-Grade Container Scheduling and Management (master binaries)
