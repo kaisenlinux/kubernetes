@@ -1,3 +1,10 @@
+kubernetes (1.22.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import new upstream release
+  * Fix kubectl bash completion
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Wed, 03 Nov 2021 00:26:32 +0200
+
 kubernetes (1.22.2-1kaisen) kaisen-packages; urgency=medium
 
   * First packaging for Kaisen Linux
