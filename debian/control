@@ -20,13 +20,13 @@ Suggests: k9s,
 	  helm,
 Description: Production-Grade Container Scheduling and Management (client binaries)
 
-Package: kubernetes-node
+Package: kubernetes-worker
 Architecture: amd64 i386 armel armhf arm64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          golang-go (>= 1.16),
 Replaces: kubernetes-master
-Description: Production-Grade Container Scheduling and Management (node binaries)
+Description: Production-Grade Container Scheduling and Management (worker binaries)
 
 Package: kubernetes-master
 Architecture: amd64 i386 armel armhf arm64
@@ -34,5 +34,5 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          golang-go (>= 1.16),
 	 etcd-server,
-Replaces: kubernetes-node
+Replaces: kubernetes-worker
 Description: Production-Grade Container Scheduling and Management (master binaries)

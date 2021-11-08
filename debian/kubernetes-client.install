@@ -1,5 +1,5 @@
 _output/bin/kubectl usr/bin/
 _output/bin/kubectl-convert usr/bin/
 _output/bin/kubemark usr/bin/
-_output/bin/bash-completion/kubectl usr/share/bash-completion/completions
+_output/bin/bash-completion/kubectl usr/share/bash-completion/completions/
 _output/bin/zsh-completion/_kubectl usr/share/zsh/vendor-completions/

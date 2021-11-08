@@ -1,3 +1,10 @@
+kubernetes (1.22.3-2kaisen) kaisen-packages; urgency=medium
+
+  * kubernetes-node now called kubernetes-worker
+  * Deletion of kubernetes-client.bash-completion file
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 08 Nov 2021 15:30:44 +0200
+
 kubernetes (1.22.3-1kaisen) kaisen-packages; urgency=medium
 
   * Import new upstream release
