@@ -1,3 +1,9 @@
+kubernetes (1.22.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.22.4 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 22 Nov 2021 14:10:38 +0200
+
 kubernetes (1.22.3-2kaisen) kaisen-packages; urgency=medium
 
   * kubernetes-node now called kubernetes-worker
