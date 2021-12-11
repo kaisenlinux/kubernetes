@@ -1,3 +1,4 @@
+//go:build !providerless
 // +build !providerless
 
 /*
@@ -1724,6 +1725,15 @@ func TestReconcileLoadBalancerRule(t *testing.T) {
 			wantLb:          true,
 			expectedProbes:  getDefaultTestProbes("Tcp", ""),
 			expectedRules:   getHATestRules(true),
+		},
+		{
+			desc:            "reconcileLoadBalancerRule shall leave probe path empty when using TCP probe",
+			service:         getTestService("test1", v1.ProtocolTCP, nil, false, 80),
+			loadBalancerSku: "standard",
+			wantLb:          true,
+			probeProtocol:   "Tcp",
+			expectedProbes:  getDefaultTestProbes("Tcp", ""),
+			expectedRules:   getDefaultTestRules(true),
 		},
 	}
 	for i, test := range testCases {
@@ -3872,7 +3882,7 @@ func TestEnsurePIPTagged(t *testing.T) {
 		service := v1.Service{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{
-					ServiceAnnotationAzurePIPTags: "a=b,c=d,e=,=f,ghi",
+					ServiceAnnotationAzurePIPTags: "A=b,c=d,e=,=f,ghi",
 				},
 			},
 		}

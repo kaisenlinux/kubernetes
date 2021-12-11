@@ -35,7 +35,7 @@ import (
 	componentbaseconfig "k8s.io/component-base/config"
 	"k8s.io/component-base/featuregate"
 	featuregatetesting "k8s.io/component-base/featuregate/testing"
-	"k8s.io/kube-scheduler/config/v1beta2"
+	"k8s.io/kube-scheduler/config/v1beta3"
 	"k8s.io/kubernetes/cmd/kube-scheduler/app/options"
 	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler/apis/config"
@@ -82,9 +82,47 @@ users:
 	}
 
 	// plugin config
-	pluginConfigFile := filepath.Join(tmpDir, "plugin.yaml")
-	if err := ioutil.WriteFile(pluginConfigFile, []byte(fmt.Sprintf(`
-apiVersion: kubescheduler.config.k8s.io/v1beta1
+	pluginConfigFilev1beta3 := filepath.Join(tmpDir, "pluginv1beta3.yaml")
+	if err := ioutil.WriteFile(pluginConfigFilev1beta3, []byte(fmt.Sprintf(`
+apiVersion: kubescheduler.config.k8s.io/v1beta3
+kind: KubeSchedulerConfiguration
+clientConnection:
+  kubeconfig: "%s"
+profiles:
+- plugins:
+    multiPoint:
+      enabled:
+      - name: DefaultBinder
+      - name: PrioritySort
+      - name: DefaultPreemption
+      - name: VolumeBinding
+      - name: NodeResourcesFit
+      - name: NodePorts
+      - name: InterPodAffinity
+      - name: TaintToleration
+      disabled:
+      - name: "*"
+    preFilter:
+      disabled:
+      - name: VolumeBinding
+      - name: InterPodAffinity
+    filter:
+      disabled:
+      - name: VolumeBinding
+      - name: InterPodAffinity
+      - name: TaintToleration
+    score:
+      disabled:
+      - name: VolumeBinding
+      - name: NodeResourcesFit
+`, configKubeconfig)), os.FileMode(0600)); err != nil {
+		t.Fatal(err)
+	}
+
+	// plugin config
+	pluginConfigFilev1beta2 := filepath.Join(tmpDir, "pluginv1beta2.yaml")
+	if err := ioutil.WriteFile(pluginConfigFilev1beta2, []byte(fmt.Sprintf(`
+apiVersion: kubescheduler.config.k8s.io/v1beta2
 kind: KubeSchedulerConfiguration
 clientConnection:
   kubeconfig: "%s"
@@ -121,7 +159,7 @@ profiles:
 	// multiple profiles config
 	multiProfilesConfig := filepath.Join(tmpDir, "multi-profiles.yaml")
 	if err := ioutil.WriteFile(multiProfilesConfig, []byte(fmt.Sprintf(`
-apiVersion: kubescheduler.config.k8s.io/v1beta1
+apiVersion: kubescheduler.config.k8s.io/v1beta2
 kind: KubeSchedulerConfiguration
 clientConnection:
   kubeconfig: "%s"
@@ -148,23 +186,10 @@ profiles:
 		t.Fatal(err)
 	}
 
-	// policy config file
-	policyConfigFile := filepath.Join(tmpDir, "policy-config.yaml")
-	if err := ioutil.WriteFile(policyConfigFile, []byte(`{
-		"kind": "Policy",
-		"apiVersion": "v1",
-		"predicates": [
-		  {"name": "MatchInterPodAffinity"}
-		],"priorities": [
-		  {"name": "InterPodAffinityPriority",   "weight": 2}
-		]}`), os.FileMode(0600)); err != nil {
-		t.Fatal(err)
-	}
-
 	// empty leader-election config
 	emptyLeaderElectionConfig := filepath.Join(tmpDir, "empty-leader-election-config.yaml")
 	if err := ioutil.WriteFile(emptyLeaderElectionConfig, []byte(fmt.Sprintf(`
-apiVersion: kubescheduler.config.k8s.io/v1beta2
+apiVersion: kubescheduler.config.k8s.io/v1beta3
 kind: KubeSchedulerConfiguration
 clientConnection:
   kubeconfig: "%s"
@@ -175,7 +200,7 @@ clientConnection:
 	// leader-election config
 	leaderElectionConfig := filepath.Join(tmpDir, "leader-election-config.yaml")
 	if err := ioutil.WriteFile(leaderElectionConfig, []byte(fmt.Sprintf(`
-apiVersion: kubescheduler.config.k8s.io/v1beta2
+apiVersion: kubescheduler.config.k8s.io/v1beta3
 kind: KubeSchedulerConfiguration
 clientConnection:
   kubeconfig: "%s"
@@ -201,20 +226,19 @@ leaderElection:
 			wantPlugins: map[string]*config.Plugins{
 				"default-scheduler": func() *config.Plugins {
 					plugins := &config.Plugins{
-						QueueSort:  defaults.PluginsV1beta2.QueueSort,
-						PreFilter:  defaults.PluginsV1beta2.PreFilter,
-						Filter:     defaults.PluginsV1beta2.Filter,
-						PostFilter: defaults.PluginsV1beta2.PostFilter,
-						PreScore:   defaults.PluginsV1beta2.PreScore,
-						Score:      defaults.PluginsV1beta2.Score,
-						Bind:       defaults.PluginsV1beta2.Bind,
-						PreBind:    defaults.PluginsV1beta2.PreBind,
-						Reserve:    defaults.PluginsV1beta2.Reserve,
+						QueueSort:  defaults.ExpandedPluginsV1beta3.QueueSort,
+						PreFilter:  defaults.ExpandedPluginsV1beta3.PreFilter,
+						Filter:     defaults.ExpandedPluginsV1beta3.Filter,
+						PostFilter: defaults.ExpandedPluginsV1beta3.PostFilter,
+						PreScore:   defaults.ExpandedPluginsV1beta3.PreScore,
+						Score:      defaults.ExpandedPluginsV1beta3.Score,
+						Bind:       defaults.ExpandedPluginsV1beta3.Bind,
+						PreBind:    defaults.ExpandedPluginsV1beta3.PreBind,
+						Reserve:    defaults.ExpandedPluginsV1beta3.Reserve,
 					}
 					plugins.PreScore.Enabled = append(plugins.PreScore.Enabled, config.Plugin{Name: names.SelectorSpread, Weight: 0})
 					plugins.Score.Enabled = append(
 						plugins.Score.Enabled,
-						config.Plugin{Name: names.VolumeBinding, Weight: 1},
 						config.Plugin{Name: names.SelectorSpread, Weight: 1},
 					)
 					return plugins
@@ -231,13 +255,13 @@ leaderElection:
 				"--kubeconfig", configKubeconfig,
 			},
 			wantPlugins: map[string]*config.Plugins{
-				"default-scheduler": defaults.PluginsV1beta2,
+				"default-scheduler": defaults.ExpandedPluginsV1beta3,
 			},
 		},
 		{
-			name: "component configuration",
+			name: "component configuration v1beta2",
 			flags: []string{
-				"--config", pluginConfigFile,
+				"--config", pluginConfigFilev1beta2,
 				"--kubeconfig", configKubeconfig,
 			},
 			wantPlugins: map[string]*config.Plugins{
@@ -275,26 +299,42 @@ leaderElection:
 			},
 		},
 		{
-			name: "policy config file",
+			name: "component configuration v1beta3",
 			flags: []string{
+				"--config", pluginConfigFilev1beta3,
 				"--kubeconfig", configKubeconfig,
-				"--policy-config-file", policyConfigFile,
 			},
 			wantPlugins: map[string]*config.Plugins{
 				"default-scheduler": {
-					QueueSort: config.PluginSet{Enabled: []config.Plugin{{Name: "PrioritySort"}}},
-					PreFilter: config.PluginSet{Enabled: []config.Plugin{{Name: "InterPodAffinity"}}},
+					Bind: config.PluginSet{Enabled: []config.Plugin{{Name: "DefaultBinder"}}},
 					Filter: config.PluginSet{
 						Enabled: []config.Plugin{
-							{Name: "NodeUnschedulable"},
-							{Name: "TaintToleration"},
-							{Name: "InterPodAffinity"},
+							{Name: "NodeResourcesFit"},
+							{Name: "NodePorts"},
+						},
+					},
+					PreFilter: config.PluginSet{
+						Enabled: []config.Plugin{
+							{Name: "NodeResourcesFit"},
+							{Name: "NodePorts"},
 						},
 					},
 					PostFilter: config.PluginSet{Enabled: []config.Plugin{{Name: "DefaultPreemption"}}},
-					PreScore:   config.PluginSet{Enabled: []config.Plugin{{Name: "InterPodAffinity"}}},
-					Score:      config.PluginSet{Enabled: []config.Plugin{{Name: "InterPodAffinity", Weight: 2}}},
-					Bind:       config.PluginSet{Enabled: []config.Plugin{{Name: "DefaultBinder"}}},
+					PreScore: config.PluginSet{
+						Enabled: []config.Plugin{
+							{Name: "InterPodAffinity"},
+							{Name: "TaintToleration"},
+						},
+					},
+					QueueSort: config.PluginSet{Enabled: []config.Plugin{{Name: "PrioritySort"}}},
+					Score: config.PluginSet{
+						Enabled: []config.Plugin{
+							{Name: "InterPodAffinity", Weight: 1},
+							{Name: "TaintToleration", Weight: 1},
+						},
+					},
+					Reserve: config.PluginSet{Enabled: []config.Plugin{{Name: "VolumeBinding"}}},
+					PreBind: config.PluginSet{Enabled: []config.Plugin{{Name: "VolumeBinding"}}},
 				},
 			},
 		},
@@ -312,8 +352,8 @@ leaderElection:
 				RenewDeadline:     metav1.Duration{Duration: 10 * time.Second},
 				RetryPeriod:       metav1.Duration{Duration: 2 * time.Second},
 				ResourceLock:      "leases",
-				ResourceName:      v1beta2.SchedulerDefaultLockObjectName,
-				ResourceNamespace: v1beta2.SchedulerDefaultLockObjectNamespace,
+				ResourceName:      v1beta3.SchedulerDefaultLockObjectName,
+				ResourceNamespace: v1beta3.SchedulerDefaultLockObjectNamespace,
 			},
 		},
 		{
@@ -330,7 +370,7 @@ leaderElection:
 				RenewDeadline:     metav1.Duration{Duration: 10 * time.Second},
 				RetryPeriod:       metav1.Duration{Duration: 2 * time.Second},
 				ResourceLock:      "leases",
-				ResourceName:      v1beta2.SchedulerDefaultLockObjectName,
+				ResourceName:      v1beta3.SchedulerDefaultLockObjectName,
 				ResourceNamespace: "default", // from deprecated CLI args
 			},
 		},
@@ -345,8 +385,8 @@ leaderElection:
 				RenewDeadline:     metav1.Duration{Duration: 10 * time.Second},
 				RetryPeriod:       metav1.Duration{Duration: 2 * time.Second},
 				ResourceLock:      "leases",
-				ResourceName:      v1beta2.SchedulerDefaultLockObjectName,
-				ResourceNamespace: v1beta2.SchedulerDefaultLockObjectNamespace,
+				ResourceName:      v1beta3.SchedulerDefaultLockObjectName,
+				ResourceNamespace: v1beta3.SchedulerDefaultLockObjectNamespace,
 			},
 		},
 		{
@@ -363,8 +403,8 @@ leaderElection:
 				RenewDeadline:     metav1.Duration{Duration: 5 * time.Second}, // from CLI args
 				RetryPeriod:       metav1.Duration{Duration: 1 * time.Second}, // from CLI args
 				ResourceLock:      "leases",
-				ResourceName:      v1beta2.SchedulerDefaultLockObjectName,
-				ResourceNamespace: v1beta2.SchedulerDefaultLockObjectNamespace,
+				ResourceName:      v1beta3.SchedulerDefaultLockObjectName,
+				ResourceNamespace: v1beta3.SchedulerDefaultLockObjectNamespace,
 			},
 		},
 	}
@@ -386,6 +426,11 @@ leaderElection:
 
 			fs := pflag.NewFlagSet("test", pflag.PanicOnError)
 			opts := options.NewOptions()
+
+			// use listeners instead of static ports so parallel test runs don't conflict
+			opts.SecureServing.Listener = makeListener(t)
+			defer opts.SecureServing.Listener.Close()
+
 			nfs := opts.Flags
 			for _, f := range nfs.FlagSets {
 				fs.AddFlagSet(f)
@@ -397,10 +442,6 @@ leaderElection:
 			// use listeners instead of static ports so parallel test runs don't conflict
 			opts.SecureServing.Listener = makeListener(t)
 			defer opts.SecureServing.Listener.Close()
-			opts.CombinedInsecureServing.Metrics.Listener = makeListener(t)
-			defer opts.CombinedInsecureServing.Metrics.Listener.Close()
-			opts.CombinedInsecureServing.Healthz.Listener = makeListener(t)
-			defer opts.CombinedInsecureServing.Healthz.Listener.Close()
 
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
