@@ -1,8 +1,14 @@
+kubernetes (1.23.2-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.2 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 23 Jan 2022 17:08:57 +0100
+
 kubernetes (1.23.1-1kaisen) kaisen-packages; urgency=medium
 
   * Import 1.23.1 version
 
- -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 09 Jan 2021 03:10:21 +0100
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 09 Jan 2022 03:10:21 +0100
 
 kubernetes (1.23.0-1kaisen) kaisen-packages; urgency=medium
 
