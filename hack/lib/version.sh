@@ -43,12 +43,12 @@ kube::version::get_version_vars() {
   # Disabled as we're not expanding these at runtime, but rather expecting
   # that another tool may have expanded these and rewritten the source (!)
   if [[ '%' == "%" ]]; then
-    KUBE_GIT_COMMIT='9d142434e3af351a628bffee3939e64c681afa4d'
+    KUBE_GIT_COMMIT='816c97ab8cff8a1c72eccca1026f7820e93e0d25'
     KUBE_GIT_TREE_STATE="archive"
-    # When a 'git archive' is exported, the 'tag: v1.23.2' below will look
+    # When a 'git archive' is exported, the 'tag: v1.23.3' below will look
     # something like 'HEAD -> release-1.8, tag: v1.8.3' where then 'tag: '
     # can be extracted from it.
-    if [[ 'tag: v1.23.2' =~ tag:\ (v[^ ,]+) ]]; then
+    if [[ 'tag: v1.23.3' =~ tag:\ (v[^ ,]+) ]]; then
      KUBE_GIT_VERSION="${BASH_REMATCH[1]}"
     fi
   fi
