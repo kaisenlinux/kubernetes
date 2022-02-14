@@ -1,3 +1,9 @@
+kubernetes (1.23.3-2kaisen) kaisen-packages; urgency=medium
+
+  * Add new tools as suggests
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 14 Feb 2022 11:13:32 +0100
+
 kubernetes (1.23.3-1kaisen) kaisen-packages; urgency=medium
 
   * Import 1.23.3 version

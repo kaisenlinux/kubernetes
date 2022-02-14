@@ -16,8 +16,14 @@ Architecture: amd64 i386 armel armhf arm64
 Depends: ${shlibs:Depends},
 	 ${misc:Depends},
 	 golang-go (>= 1.16),
-Suggests: k9s,
-	  helm,
+Suggests: helm,
+	  k9s,
+	  kind,
+	  krew,
+	  kubectx,
+	  kustomize,
+	  kyverno,
+	  popeye,
 Description: Production-Grade Container Scheduling and Management (client binaries)
 
 Package: kubernetes-worker
