@@ -338,6 +338,206 @@ func TestResultIntoWithNoBodyReturnsErr(t *testing.T) {
 	}
 }
 
+func TestURLTemplate(t *testing.T) {
+	uri, _ := url.Parse("http://localhost/some/base/url/path")
+	uriSingleSlash, _ := url.Parse("http://localhost/")
+	testCases := []struct {
+		Request          *Request
+		ExpectedFullURL  string
+		ExpectedFinalURL string
+	}{
+		{
+			// non dynamic client
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("POST").
+				Prefix("api", "v1").Resource("r1").Namespace("ns").Name("nm").Param("p0", "v0"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/api/v1/namespaces/ns/r1/nm?p0=v0",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/api/v1/namespaces/%7Bnamespace%7D/r1/%7Bname%7D?p0=%7Bvalue%7D",
+		},
+		{
+			// non dynamic client with wrong api group
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("POST").
+				Prefix("pre1", "v1").Resource("r1").Namespace("ns").Name("nm").Param("p0", "v0"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/pre1/v1/namespaces/ns/r1/nm?p0=v0",
+			ExpectedFinalURL: "http://localhost/%7Bprefix%7D",
+		},
+		{
+			// dynamic client with core group + namespace + resourceResource (with name)
+			// /api/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/api/v1/namespaces/ns/r1/name1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/api/v1/namespaces/ns/r1/name1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/api/v1/namespaces/%7Bnamespace%7D/r1/%7Bname%7D",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/g1/v1/namespaces/ns/r1/name1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/g1/v1/namespaces/ns/r1/name1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/g1/v1/namespaces/%7Bnamespace%7D/r1/%7Bname%7D",
+		},
+		{
+			// dynamic client with core group + namespace + resourceResource (with NO name)
+			// /api/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/api/v1/namespaces/ns/r1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/api/v1/namespaces/ns/r1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/api/v1/namespaces/%7Bnamespace%7D/r1",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with NO name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/g1/v1/namespaces/ns/r1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/g1/v1/namespaces/ns/r1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/g1/v1/namespaces/%7Bnamespace%7D/r1",
+		},
+		{
+			// dynamic client with core group + resourceResource (with name)
+			// /api/$RESOURCEVERSION/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/api/v1/r1/name1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/api/v1/r1/name1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/api/v1/r1/%7Bname%7D",
+		},
+		{
+			// dynamic client with named group + resourceResource (with name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/g1/v1/r1/name1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/g1/v1/r1/name1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/g1/v1/r1/%7Bname%7D",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME/$SUBRESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces/finalize"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces/finalize",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bnamespace%7D/namespaces/%7Bname%7D/finalize",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bnamespace%7D/namespaces/%7Bname%7D",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with NO name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%SUBRESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/namespaces/finalize"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/namespaces/finalize",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bnamespace%7D/namespaces/finalize",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with NO name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%SUBRESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/namespaces/status"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/namespaces/status",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bnamespace%7D/namespaces/status",
+		},
+		{
+			// dynamic client with named group + namespace + resourceResource (with no name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/namespaces"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/namespaces",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bnamespace%7D/namespaces",
+		},
+		{
+			// dynamic client with named group + resourceResource (with name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/finalize"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/finalize",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bname%7D/finalize",
+		},
+		{
+			// dynamic client with named group + resourceResource (with name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces/status"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces/status",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bname%7D/status",
+		},
+		{
+			// dynamic client with named group + resourceResource (with name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces/namespaces"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/namespaces",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces/%7Bname%7D",
+		},
+		{
+			// dynamic client with named group + resourceResource (with no name)
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/apis/namespaces/namespaces/namespaces"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/apis/namespaces/namespaces/namespaces",
+		},
+		{
+			// dynamic client with wrong api group + namespace + resourceResource (with name) + subresource
+			// /apis/$NAMEDGROUPNAME/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME/$SUBRESOURCE
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/pre1/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces/finalize"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/pre1/namespaces/namespaces/namespaces/namespaces/namespaces/namespaces/finalize",
+			ExpectedFinalURL: "http://localhost/%7Bprefix%7D",
+		},
+		{
+			// dynamic client with core group + namespace + resourceResource (with name) where baseURL is a single /
+			// /api/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uriSingleSlash, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/api/v1/namespaces/ns/r2/name1"),
+			ExpectedFullURL:  "http://localhost/api/v1/namespaces/ns/r2/name1",
+			ExpectedFinalURL: "http://localhost/api/v1/namespaces/%7Bnamespace%7D/r2/%7Bname%7D",
+		},
+		{
+			// dynamic client with core group + namespace + resourceResource (with name) where baseURL is 'some/base/url/path'
+			// /api/$RESOURCEVERSION/namespaces/$NAMESPACE/$RESOURCE/%NAME
+			Request: NewRequestWithClient(uri, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/api/v1/namespaces/ns/r3/name1"),
+			ExpectedFullURL:  "http://localhost/some/base/url/path/api/v1/namespaces/ns/r3/name1",
+			ExpectedFinalURL: "http://localhost/some/base/url/path/api/v1/namespaces/%7Bnamespace%7D/r3/%7Bname%7D",
+		},
+		{
+			// dynamic client where baseURL is a single /
+			// /
+			Request: NewRequestWithClient(uriSingleSlash, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/"),
+			ExpectedFullURL:  "http://localhost/",
+			ExpectedFinalURL: "http://localhost/",
+		},
+		{
+			// dynamic client where baseURL is a single /
+			// /version
+			Request: NewRequestWithClient(uriSingleSlash, "", ClientContentConfig{GroupVersion: schema.GroupVersion{Group: "test"}}, nil).Verb("DELETE").
+				Prefix("/version"),
+			ExpectedFullURL:  "http://localhost/version",
+			ExpectedFinalURL: "http://localhost/version",
+		},
+	}
+	for i, testCase := range testCases {
+		r := testCase.Request
+		full := r.URL()
+		if full.String() != testCase.ExpectedFullURL {
+			t.Errorf("%d: unexpected initial URL: %s %s", i, full, testCase.ExpectedFullURL)
+		}
+		actualURL := r.finalURLTemplate()
+		actual := actualURL.String()
+		if actual != testCase.ExpectedFinalURL {
+			t.Errorf("%d: unexpected URL template: %s %s", i, actual, testCase.ExpectedFinalURL)
+		}
+		if r.URL().String() != full.String() {
+			t.Errorf("%d, creating URL template changed request: %s -> %s", i, full.String(), r.URL().String())
+		}
+	}
+}
+
 func TestTransformResponse(t *testing.T) {
 	invalid := []byte("aaaaa")
 	uri, _ := url.Parse("http://localhost")
@@ -1392,7 +1592,9 @@ func TestCheckRetryClosesBody(t *testing.T) {
 	defer testServer.Close()
 
 	backoff := &testBackoffManager{}
-	expectedSleeps := []time.Duration{0, time.Second, 0, time.Second, 0, time.Second, 0, time.Second, 0}
+
+	// testBackoffManager.CalculateBackoff always returns 0
+	expectedSleeps := []time.Duration{0, time.Second, time.Second, time.Second, time.Second}
 
 	c := testRESTClient(t, testServer)
 	c.createBackoffMgr = func() BackoffManager { return backoff }
@@ -1440,10 +1642,12 @@ func TestConnectionResetByPeerIsRetried(t *testing.T) {
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
-	// We have a sleep before each retry (including the initial one) and for
-	// every "retry-after" call - thus 5 together.
-	if len(backoff.sleeps) != 5 {
-		t.Errorf("Expected 5 retries, got: %d", len(backoff.sleeps))
+	if count != 3 {
+		t.Errorf("Expected 3 attempts, got: %d", count)
+	}
+	// We have a sleep before each retry (including the initial one) thus 3 together.
+	if len(backoff.sleeps) != 3 {
+		t.Errorf("Expected 3 backoff.Sleep, got: %d", len(backoff.sleeps))
 	}
 }
 
@@ -2560,7 +2764,7 @@ func TestRequestWatchWithRetry(t *testing.T) {
 	testRequestWithRetry(t, "Watch", func(ctx context.Context, r *Request) {
 		w, err := r.Watch(ctx)
 		if err == nil {
-			// in this test the the response body returned by the server is always empty,
+			// in this test the response body returned by the server is always empty,
 			// this will cause StreamWatcher.receive() to:
 			// - return an io.EOF to indicate that the watch closed normally and
 			// - then close the io.Reader
@@ -2588,7 +2792,7 @@ func TestRequestWatchRetryWithRateLimiterBackoffAndMetrics(t *testing.T) {
 	testRetryWithRateLimiterBackoffAndMetrics(t, "Watch", func(ctx context.Context, r *Request) {
 		w, err := r.Watch(ctx)
 		if err == nil {
-			// in this test the the response body returned by the server is always empty,
+			// in this test the response body returned by the server is always empty,
 			// this will cause StreamWatcher.receive() to:
 			// - return an io.EOF to indicate that the watch closed normally and
 			// - then close the io.Reader
@@ -2616,7 +2820,7 @@ func TestRequestWatchWithRetryInvokeOrder(t *testing.T) {
 	testWithRetryInvokeOrder(t, "Watch", func(ctx context.Context, r *Request) {
 		w, err := r.Watch(ctx)
 		if err == nil {
-			// in this test the the response body returned by the server is always empty,
+			// in this test the response body returned by the server is always empty,
 			// this will cause StreamWatcher.receive() to:
 			// - return an io.EOF to indicate that the watch closed normally and
 			// - then close the io.Reader
@@ -2631,7 +2835,7 @@ func TestRequestWatchWithWrapPreviousError(t *testing.T) {
 	testWithWrapPreviousError(t, func(ctx context.Context, r *Request) error {
 		w, err := r.Watch(ctx)
 		if err == nil {
-			// in this test the the response body returned by the server is always empty,
+			// in this test the response body returned by the server is always empty,
 			// this will cause StreamWatcher.receive() to:
 			// - return an io.EOF to indicate that the watch closed normally and
 			// - then close the io.Reader
@@ -2824,7 +3028,8 @@ type withRateLimiterBackoffManagerAndMetrics struct {
 	flowcontrol.RateLimiter
 	*NoBackoff
 	metrics.ResultMetric
-	backoffWaitSeconds int
+	calculateBackoffSeq int64
+	calculateBackoffFn  func(i int64) time.Duration
 
 	invokeOrderGot []string
 	sleepsGot      []string
@@ -2839,9 +3044,8 @@ func (lb *withRateLimiterBackoffManagerAndMetrics) Wait(ctx context.Context) err
 func (lb *withRateLimiterBackoffManagerAndMetrics) CalculateBackoff(actualUrl *url.URL) time.Duration {
 	lb.invokeOrderGot = append(lb.invokeOrderGot, "BackoffManager.CalculateBackoff")
 
-	// we simulate a sleep sequence of 0m, 2m, 4m, 6m, ...
-	waitFor := time.Duration(lb.backoffWaitSeconds) * time.Minute
-	lb.backoffWaitSeconds += 2
+	waitFor := lb.calculateBackoffFn(lb.calculateBackoffSeq)
+	lb.calculateBackoffSeq++
 	return waitFor
 }
 
@@ -2868,14 +3072,16 @@ func (lb *withRateLimiterBackoffManagerAndMetrics) Do() {
 
 func testRetryWithRateLimiterBackoffAndMetrics(t *testing.T, key string, doFunc func(ctx context.Context, r *Request)) {
 	type expected struct {
-		attempts int
-		order    []string
+		attempts    int
+		order       []string
+		sleeps      []string
+		statusCodes []string
 	}
 
 	// we define the expected order of how the client invokes the
 	// rate limiter, backoff, and metrics methods.
 	// scenario:
-	//  - A: original request fails with a retryable response: (500, 'Retry-After: 1')
+	//  - A: original request fails with a retryable response: (500, 'Retry-After: N')
 	//  - B: retry 1: successful with a status code 200
 	// so we have a total of 2 attempts
 	invokeOrderWant := []string{
@@ -2887,17 +3093,16 @@ func testRetryWithRateLimiterBackoffAndMetrics(t *testing.T, key string, doFunc 
 		"BackoffManager.Sleep",
 
 		// A: first attempt for which the server sends a retryable response
+		// status code: 500, Retry-Afer: N
 		"Client.Do",
 
-		// we got a response object, status code: 500, Retry-Afer: 1
+		// we got a response object, status code: 500, Retry-Afer: N
 		//  - call metrics method with appropriate status code
 		//  - update backoff parameters with the status code returned
-		//  - sleep for N seconds from 'Retry-After: N' response header
 		"RequestResult.Increment",
 		"BackoffManager.UpdateBackoff",
-		"BackoffManager.Sleep",
-		// sleep for delay dictated by backoff parameters
 		"BackoffManager.CalculateBackoff",
+		// sleep for delay=max(BackoffManager.CalculateBackoff, Retry-After: N)
 		"BackoffManager.Sleep",
 		// wait as dictated by the client rate lmiter
 		"RateLimiter.Wait",
@@ -2910,46 +3115,104 @@ func testRetryWithRateLimiterBackoffAndMetrics(t *testing.T, key string, doFunc 
 		"RequestResult.Increment",
 		"BackoffManager.UpdateBackoff",
 	}
-	sleepWant := []string{
-		// initial backoff.Sleep before we send the request to the server for the first time
-		"0s",
-		// from 'Retry-After: 1' response header (A)
-		(1 * time.Second).String(),
-		// backoff.Sleep before retry 1 (B)
-		(2 * time.Minute).String(),
-	}
 	statusCodesWant := []string{
 		"500",
 		"200",
 	}
 
 	tests := []struct {
-		name          string
-		maxRetries    int
-		serverReturns []responseErr
+		name               string
+		maxRetries         int
+		serverReturns      []responseErr
+		calculateBackoffFn func(i int64) time.Duration
 		// expectations differ based on whether it is 'Watch', 'Stream' or 'Do'
 		expectations map[string]expected
 	}{
 		{
-			name:       "success after one retry",
+			name:       "success after one retry, Retry-After: N > BackoffManager.CalculateBackoff",
 			maxRetries: 1,
 			serverReturns: []responseErr{
-				{response: retryAfterResponse(), err: nil},
+				{response: retryAfterResponseWithDelay("5"), err: nil},
 				{response: &http.Response{StatusCode: http.StatusOK}, err: nil},
 			},
+			// we simulate a sleep sequence of 0s, 1s, 2s, 3s, ...
+			calculateBackoffFn: func(i int64) time.Duration { return time.Duration(i * int64(time.Second)) },
 			expectations: map[string]expected{
 				"Do": {
-					attempts: 2,
-					order:    invokeOrderWant,
+					attempts:    2,
+					order:       invokeOrderWant,
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						// initial backoff.Sleep before we send the request to the server for the first time
+						"0s",
+						// maximum of:
+						//  - 'Retry-After: 5' response header from (A)
+						//  - BackoffManager.CalculateBackoff (will return 1s)
+						(5 * time.Second).String(),
+					},
 				},
 				"Watch": {
 					attempts: 2,
 					// Watch does not do 'RateLimiter.Wait' before initially sending the request to the server
-					order: invokeOrderWant[1:],
+					order:       invokeOrderWant[1:],
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						"0s",
+						(5 * time.Second).String(),
+					},
 				},
 				"Stream": {
+					attempts:    2,
+					order:       invokeOrderWant,
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						"0s",
+						(5 * time.Second).String(),
+					},
+				},
+			},
+		},
+		{
+			name:       "success after one retry, Retry-After: N < BackoffManager.CalculateBackoff",
+			maxRetries: 1,
+			serverReturns: []responseErr{
+				{response: retryAfterResponseWithDelay("2"), err: nil},
+				{response: &http.Response{StatusCode: http.StatusOK}, err: nil},
+			},
+			// we simulate a sleep sequence of 0s, 4s, 8s, 16s, ...
+			calculateBackoffFn: func(i int64) time.Duration { return time.Duration(i * int64(4*time.Second)) },
+			expectations: map[string]expected{
+				"Do": {
+					attempts:    2,
+					order:       invokeOrderWant,
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						// initial backoff.Sleep before we send the request to the server for the first time
+						"0s",
+						// maximum of:
+						//  - 'Retry-After: 2' response header from (A)
+						//  - BackoffManager.CalculateBackoff (will return 4s)
+						(4 * time.Second).String(),
+					},
+				},
+				"Watch": {
 					attempts: 2,
-					order:    invokeOrderWant,
+					// Watch does not do 'RateLimiter.Wait' before initially sending the request to the server
+					order:       invokeOrderWant[1:],
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						"0s",
+						(4 * time.Second).String(),
+					},
+				},
+				"Stream": {
+					attempts:    2,
+					order:       invokeOrderWant,
+					statusCodes: statusCodesWant,
+					sleeps: []string{
+						"0s",
+						(4 * time.Second).String(),
+					},
 				},
 			},
 		},
@@ -2958,8 +3221,9 @@ func testRetryWithRateLimiterBackoffAndMetrics(t *testing.T, key string, doFunc 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			interceptor := &withRateLimiterBackoffManagerAndMetrics{
-				RateLimiter: flowcontrol.NewFakeAlwaysRateLimiter(),
-				NoBackoff:   &NoBackoff{},
+				RateLimiter:        flowcontrol.NewFakeAlwaysRateLimiter(),
+				NoBackoff:          &NoBackoff{},
+				calculateBackoffFn: test.calculateBackoffFn,
 			}
 
 			// TODO: today this is the only site where a test overrides the
@@ -3027,11 +3291,11 @@ func testRetryWithRateLimiterBackoffAndMetrics(t *testing.T, key string, doFunc 
 			if !cmp.Equal(want.order, interceptor.invokeOrderGot) {
 				t.Errorf("%s: Expected invoke order to match, diff: %s", key, cmp.Diff(want.order, interceptor.invokeOrderGot))
 			}
-			if !cmp.Equal(sleepWant, interceptor.sleepsGot) {
-				t.Errorf("%s: Expected sleep sequence to match, diff: %s", key, cmp.Diff(sleepWant, interceptor.sleepsGot))
+			if !cmp.Equal(want.sleeps, interceptor.sleepsGot) {
+				t.Errorf("%s: Expected sleep sequence to match, diff: %s", key, cmp.Diff(want.sleeps, interceptor.sleepsGot))
 			}
-			if !cmp.Equal(statusCodesWant, interceptor.statusCodesGot) {
-				t.Errorf("%s: Expected status codes to match, diff: %s", key, cmp.Diff(statusCodesWant, interceptor.statusCodesGot))
+			if !cmp.Equal(want.statusCodes, interceptor.statusCodesGot) {
+				t.Errorf("%s: Expected status codes to match, diff: %s", key, cmp.Diff(want.statusCodes, interceptor.statusCodesGot))
 			}
 		})
 	}

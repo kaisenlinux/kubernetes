@@ -43,12 +43,12 @@ kube::version::get_version_vars() {
   # Disabled as we're not expanding these at runtime, but rather expecting
   # that another tool may have expanded these and rewritten the source (!)
   if [[ '%' == "%" ]]; then
-    KUBE_GIT_COMMIT='aef86a93758dc3cb2c658dd9657ab4ad4afc21cb'
+    KUBE_GIT_COMMIT='e4d4e1ab7cf1bf15273ef97303551b279f0920a9'
     KUBE_GIT_TREE_STATE="archive"
-    # When a 'git archive' is exported, the 'tag: v1.24.3' below will look
+    # When a 'git archive' is exported, the 'tag: v1.25.1' below will look
     # something like 'HEAD -> release-1.8, tag: v1.8.3' where then 'tag: '
     # can be extracted from it.
-    if [[ 'tag: v1.24.3' =~ tag:\ (v[^ ,]+) ]]; then
+    if [[ 'tag: v1.25.1' =~ tag:\ (v[^ ,]+) ]]; then
      KUBE_GIT_VERSION="${BASH_REMATCH[1]}"
     fi
   fi
@@ -147,7 +147,7 @@ kube::version::load_version_vars() {
 # Prints the value that needs to be passed to the -ldflags parameter of go build
 # in order to set the Kubernetes based on the git tree status.
 # IMPORTANT: if you update any of these, also update the lists in
-# pkg/version/def.bzl and hack/print-workspace-status.sh.
+# hack/print-workspace-status.sh.
 kube::version::ldflags() {
   kube::version::get_version_vars
 
@@ -155,7 +155,6 @@ kube::version::ldflags() {
   function add_ldflag() {
     local key=${1}
     local val=${2}
-    # If you update these, also update the list component-base/version/def.bzl.
     ldflags+=(
       "-X '${KUBE_GO_PACKAGE}/vendor/k8s.io/client-go/pkg/version.${key}=${val}'"
       "-X '${KUBE_GO_PACKAGE}/vendor/k8s.io/component-base/version.${key}=${val}'"
