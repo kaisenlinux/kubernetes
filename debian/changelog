@@ -1,3 +1,10 @@
+kubernetes (1.25.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.4 version
+  * Update the golang-go version required
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Wed, 23 Nov 2022 16:05:31 +0100
+
 kubernetes (1.25.1-1kaisen) kaisen-packages; urgency=medium
 
   * Import the 1.25.1 version

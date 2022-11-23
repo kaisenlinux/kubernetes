@@ -1,7 +1,12 @@
 #!/usr/bin/make -f
 
+export GOPATH=$(CURDIR)/_output
+
 %:
 	dh $@
+
+override_dh_auto_clean:
+	rm -rf $(CURDIR)/_output/
 
 override_dh_auto_build:
 	#Kubernetes compilation
