@@ -1,3 +1,9 @@
+kubernetes (1.25.5-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.5 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Thu, 08 Dec 2022 23:13:46 +0100
+
 kubernetes (1.25.4-1kaisen) kaisen-packages; urgency=medium
 
   * Import the 1.25.4 version
