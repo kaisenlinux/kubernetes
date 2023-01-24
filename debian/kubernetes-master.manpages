@@ -1,4 +1,4 @@
-_output/bin/man/kube-apiserver*
-_output/bin/man/kube-controller-manager*
-_output/bin/man/kube-scheduler*
-_output/bin/man/kubeadm*
+_output/man/kube-apiserver*
+_output/man/kube-controller-manager*
+_output/man/kube-scheduler*
+_output/man/kubeadm*

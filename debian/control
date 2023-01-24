@@ -31,7 +31,6 @@ Architecture: amd64 i386 arm64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
          golang-go (>= 1.19),
-Replaces: kubernetes-master
 Description: Production-Grade Container Scheduling and Management (worker binaries)
 
 Package: kubernetes-master
@@ -40,5 +39,4 @@ Depends: ${shlibs:Depends},
          ${misc:Depends},
          golang-go (>= 1.19),
 	 etcd-server,
-Replaces: kubernetes-worker
 Description: Production-Grade Container Scheduling and Management (master binaries)

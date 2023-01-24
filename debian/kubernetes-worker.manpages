@@ -1,3 +1,2 @@
-_output/bin/man/kubelet*
-_output/bin/man/kube-proxy*
-_output/bin/man/kubeadm*
+_output/man/kubelet*
+_output/man/kube-proxy*

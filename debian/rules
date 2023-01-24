@@ -11,36 +11,38 @@ override_dh_auto_clean:
 override_dh_auto_build:
 	#Kubernetes compilation
 	make
-	#Create kubectl bash completion
-	mkdir -p _output/bin/bash-completion
-	_output/bin/kubectl completion bash > _output/bin/bash-completion/kubectl
-	#Create kubectl zsh completion
-	mkdir -p _output/bin/zsh-completion
-	_output/bin/kubectl completion zsh > _output/bin/zsh-completion/_kubectl
-	#Create manpages
-	mkdir -p _output/bin/man
-	_output/bin/genman _output/bin/man/ kubeadm
-	_output/bin/genman _output/bin/man/ kube-apiserver
-	_output/bin/genman _output/bin/man/ kube-controller-manager
-	_output/bin/genman _output/bin/man/ kubectl
-	_output/bin/genman _output/bin/man/ kubelet
-	_output/bin/genman _output/bin/man/ kube-proxy
-	_output/bin/genman _output/bin/man/ kube-scheduler
-	#Create kubectl docs
-	mkdir -p _output/bin/docs
-	_output/bin/gendocs _output/bin/docs/
-	#Create other binaries docs
-	mkdir -p _output/bin/kubedocs
-	_output/bin/genkubedocs _output/bin/kubedocs/ kubeadm
-	_output/bin/genkubedocs _output/bin/kubedocs/ kube-apiserver
-	_output/bin/genkubedocs _output/bin/kubedocs/ kube-controller-manager
-	_output/bin/genkubedocs _output/bin/kubedocs/ kubelet
-	_output/bin/genkubedocs _output/bin/kubedocs/ kube-proxy
-	_output/bin/genkubedocs _output/bin/kubedocs/ kube-scheduler
+
+override_dh_auto_test:
 
 override_dh_installchangelogs:
 	dh_installchangelogs -X CHANGELOG.md CHANGELOG/CHANGELOG-*.md
 
-override_dh_dwz:
+override_dh_auto_install:
+	#Make directory for manpages and docs
+	mkdir -p $(CURDIR)/_output/docs $(CURDIR)/_output/man
+	#Install the kubectl BASH completion
+	$(CURDIR)/_output/bin/kubectl completion bash > $(CURDIR)/debian/kubernetes-client/usr/share/bash-completion/completions/kubectl
+	#Install the kubectl ZSH completion
+	$(CURDIR)/_output/bin/kubectl completion zsh > $(CURDIR)/debian/kubernetes-client/usr/share/zsh/vendor-completions/_kubectl
+	#Generate kubernetes-client manpages
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kubectl
+	#Generate kubernetes-worker manpages
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kubelet
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kube-proxy
+	#Generate kubernetes-master manpages
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kubeadm
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kube-apiserver
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kube-controller-manager
+	$(CURDIR)/_output/bin/genman $(CURDIR)/_output/man kube-scheduler
+	#Generate kubernetes-client docs
+	$(CURDIR)/_output/bin/gendocs $(CURDIR)/_output/docs
+	#Generate kubernetes-worker docs
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kubelet
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kube-proxy
+	#Generate kubernetes-master docs
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kubeadm
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kube-apiserver
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kube-controller-manager
+	$(CURDIR)/_output/bin/genkubedocs $(CURDIR)/_output/docs kube-scheduler
 
-override_dh_auto_test:
+override_dh_dwz:
