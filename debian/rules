@@ -10,7 +10,10 @@ override_dh_auto_clean:
 
 override_dh_auto_build:
 	#Kubernetes compilation
-	make
+	make all
+	make genman
+	make gendocs
+	make genkubedocs
 
 override_dh_auto_test:
 

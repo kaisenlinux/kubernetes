@@ -5,7 +5,7 @@ Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
 Build-Depends: debhelper-compat (= 13),
 	       golang-go (>= 1.19),
 	       dh-golang,
-Standards-Version: 4.6.0
+Standards-Version: 4.6.2
 Homepage: https://kubernetes.io
 Vcs-Browser: https://gitlab.com/kaisenlinux/packages/kubernetes
 Vcs-Git: https://gitlab.com/kaisenlinux/packages/kubernetes.git

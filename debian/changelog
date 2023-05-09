@@ -1,3 +1,11 @@
+kubernetes (1.25.9-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.9 version
+  * Execution of make all instead of make to build kubernetes
+  * Add the make genman, gendoc and genkubedocs instructions
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 09 May 2023 10:06:49 +0100
+
 kubernetes (1.25.8-1kaisen) kaisen-packages; urgency=medium
 
   * Import the 1.25.8 version
