@@ -47,6 +47,24 @@ const (
 	externalPort      = 32440
 )
 
+func TestGetNetworkByName(t *testing.T) {
+	hns := hns{}
+	Network := mustTestNetwork(t)
+
+	network, err := hns.getNetworkByName(Network.Name)
+	if err != nil {
+		t.Error(err)
+	}
+
+	if !strings.EqualFold(network.id, Network.Id) {
+		t.Errorf("%v does not match %v", network.id, Network.Id)
+	}
+	err = Network.Delete()
+	if err != nil {
+		t.Error(err)
+	}
+}
+
 func TestGetAllEndpointsByNetwork(t *testing.T) {
 	hns := hns{}
 	Network := mustTestNetwork(t)
@@ -85,24 +103,6 @@ func TestGetAllEndpointsByNetwork(t *testing.T) {
 	err = Endpoint.Delete()
 	if err != nil {
 		t.Error(err)
-	}
-	err = Network.Delete()
-	if err != nil {
-		t.Error(err)
-	}
-}
-
-func TestGetNetworkByName(t *testing.T) {
-	hns := hns{}
-	Network := mustTestNetwork(t)
-
-	network, err := hns.getNetworkByName(Network.Name)
-	if err != nil {
-		t.Error(err)
-	}
-
-	if !strings.EqualFold(network.id, Network.Id) {
-		t.Errorf("%v does not match %v", network.id, Network.Id)
 	}
 	err = Network.Delete()
 	if err != nil {
@@ -180,11 +180,11 @@ func TestGetEndpointByIpAddressAndName(t *testing.T) {
 		t.Errorf("%v does not match %v", endpoint.ip, Endpoint.IpConfigurations[0].IpAddress)
 	}
 
-	endpoint, err = hns.getEndpointByName(Endpoint.Name)
+	endpoint2, err := hns.getEndpointByName(Endpoint.Name)
 	if err != nil {
 		t.Error(err)
 	}
-	diff := cmp.Diff(endpoint, Endpoint)
+	diff := cmp.Diff(endpoint, endpoint2)
 	if diff != "" {
 		t.Errorf("getEndpointByName(%s) returned a different endpoint. Diff: %s ", Endpoint.Name, diff)
 	}

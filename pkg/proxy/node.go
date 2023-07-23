@@ -33,6 +33,12 @@ type NodePodCIDRHandler struct {
 	podCIDRs []string
 }
 
+func NewNodePodCIDRHandler(podCIDRs []string) *NodePodCIDRHandler {
+	return &NodePodCIDRHandler{
+		podCIDRs: podCIDRs,
+	}
+}
+
 var _ config.NodeHandler = &NodePodCIDRHandler{}
 
 // OnNodeAdd is a handler for Node creates.
@@ -43,13 +49,13 @@ func (n *NodePodCIDRHandler) OnNodeAdd(node *v1.Node) {
 	podCIDRs := node.Spec.PodCIDRs
 	// initialize podCIDRs
 	if len(n.podCIDRs) == 0 && len(podCIDRs) > 0 {
-		klog.InfoS("Setting current PodCIDRs", "PodCIDRs", podCIDRs)
+		klog.InfoS("Setting current PodCIDRs", "podCIDRs", podCIDRs)
 		n.podCIDRs = podCIDRs
 		return
 	}
 	if !reflect.DeepEqual(n.podCIDRs, podCIDRs) {
 		klog.ErrorS(nil, "Using NodeCIDR LocalDetector mode, current PodCIDRs are different than previous PodCIDRs, restarting",
-			"node", klog.KObj(node), "New Node PodCIDRs", podCIDRs, "Old Node UID", n.podCIDRs)
+			"node", klog.KObj(node), "newPodCIDRs", podCIDRs, "oldPodCIDRs", n.podCIDRs)
 		panic("Current Node PodCIDRs are different than previous PodCIDRs, restarting")
 	}
 }
@@ -61,13 +67,13 @@ func (n *NodePodCIDRHandler) OnNodeUpdate(_, node *v1.Node) {
 	podCIDRs := node.Spec.PodCIDRs
 	// initialize podCIDRs
 	if len(n.podCIDRs) == 0 && len(podCIDRs) > 0 {
-		klog.InfoS("Setting current PodCIDRs", "PodCIDRs", podCIDRs)
+		klog.InfoS("Setting current PodCIDRs", "podCIDRs", podCIDRs)
 		n.podCIDRs = podCIDRs
 		return
 	}
 	if !reflect.DeepEqual(n.podCIDRs, podCIDRs) {
 		klog.ErrorS(nil, "Using NodeCIDR LocalDetector mode, current PodCIDRs are different than previous PodCIDRs, restarting",
-			"node", klog.KObj(node), "New Node PodCIDRs", podCIDRs, "Old Node UID", n.podCIDRs)
+			"node", klog.KObj(node), "newPodCIDRs", podCIDRs, "oldPODCIDRs", n.podCIDRs)
 		panic("Current Node PodCIDRs are different than previous PodCIDRs, restarting")
 	}
 }

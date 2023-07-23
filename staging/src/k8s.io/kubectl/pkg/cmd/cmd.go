@@ -50,6 +50,7 @@ import (
 	"k8s.io/kubectl/pkg/cmd/diff"
 	"k8s.io/kubectl/pkg/cmd/drain"
 	"k8s.io/kubectl/pkg/cmd/edit"
+	"k8s.io/kubectl/pkg/cmd/events"
 	cmdexec "k8s.io/kubectl/pkg/cmd/exec"
 	"k8s.io/kubectl/pkg/cmd/explain"
 	"k8s.io/kubectl/pkg/cmd/expose"
@@ -81,6 +82,10 @@ import (
 )
 
 const kubectlCmdHeaders = "KUBECTL_COMMAND_HEADERS"
+
+var (
+	allowedCmdsSubcommandPlugin = map[string]struct{}{"create": {}}
+)
 
 type KubectlOptions struct {
 	PluginHandler PluginHandler
@@ -115,7 +120,7 @@ func NewDefaultKubectlCommandWithArgs(o KubectlOptions) *cobra.Command {
 
 		// only look for suitable extension executables if
 		// the specified command does not already exist
-		if _, _, err := cmd.Find(cmdPathPieces); err != nil {
+		if foundCmd, foundArgs, err := cmd.Find(cmdPathPieces); err != nil {
 			// Also check the commands that will be added by Cobra.
 			// These commands are only added once rootCmd.Execute() is called, so we
 			// need to check them explicitly here.
@@ -131,9 +136,37 @@ func NewDefaultKubectlCommandWithArgs(o KubectlOptions) *cobra.Command {
 			case "help", cobra.ShellCompRequestCmd, cobra.ShellCompNoDescRequestCmd:
 				// Don't search for a plugin
 			default:
-				if err := HandlePluginCommand(o.PluginHandler, cmdPathPieces); err != nil {
+				if err := HandlePluginCommand(o.PluginHandler, cmdPathPieces, false); err != nil {
 					fmt.Fprintf(o.IOStreams.ErrOut, "Error: %v\n", err)
 					os.Exit(1)
+				}
+			}
+		} else if err == nil {
+			if cmdutil.CmdPluginAsSubcommand.IsEnabled() {
+				// Command exists(e.g. kubectl create), but it is not certain that
+				// subcommand also exists (e.g. kubectl create networkpolicy)
+				if _, ok := allowedCmdsSubcommandPlugin[foundCmd.Name()]; ok {
+					var subcommand string
+					for _, arg := range foundArgs { // first "non-flag" argument as subcommand
+						if !strings.HasPrefix(arg, "-") {
+							subcommand = arg
+							break
+						}
+					}
+					builtinSubcmdExist := false
+					for _, subcmd := range foundCmd.Commands() {
+						if subcmd.Name() == subcommand {
+							builtinSubcmdExist = true
+							break
+						}
+					}
+
+					if !builtinSubcmdExist {
+						if err := HandlePluginCommand(o.PluginHandler, cmdPathPieces, true); err != nil {
+							fmt.Fprintf(o.IOStreams.ErrOut, "Error: %v\n", err)
+							os.Exit(1)
+						}
+					}
 				}
 			}
 		}
@@ -223,7 +256,7 @@ func (h *DefaultPluginHandler) Execute(executablePath string, cmdArgs, environme
 
 // HandlePluginCommand receives a pluginHandler and command-line arguments and attempts to find
 // a plugin executable on the PATH that satisfies the given arguments.
-func HandlePluginCommand(pluginHandler PluginHandler, cmdArgs []string) error {
+func HandlePluginCommand(pluginHandler PluginHandler, cmdArgs []string, exactMatch bool) error {
 	var remainingArgs []string // all "non-flag" arguments
 	for _, arg := range cmdArgs {
 		if strings.HasPrefix(arg, "-") {
@@ -243,6 +276,12 @@ func HandlePluginCommand(pluginHandler PluginHandler, cmdArgs []string) error {
 	for len(remainingArgs) > 0 {
 		path, found := pluginHandler.Lookup(strings.Join(remainingArgs, "-"))
 		if !found {
+			if exactMatch {
+				// if exactMatch is true, we shouldn't continue searching with shorter names.
+				// this is especially for not searching kubectl-create plugin
+				// when kubectl-create-foo plugin is not found.
+				break
+			}
 			remainingArgs = remainingArgs[:len(remainingArgs)-1]
 			continue
 		}
@@ -279,8 +318,15 @@ func NewKubectlCommand(o KubectlOptions) *cobra.Command {
 		Run: runHelp,
 		// Hook before and after Run initialize and write profiles to disk,
 		// respectively.
-		PersistentPreRunE: func(*cobra.Command, []string) error {
+		PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
 			rest.SetDefaultWarningHandler(warningHandler)
+
+			if cmd.Name() == cobra.ShellCompRequestCmd {
+				// This is the __complete or __completeNoDesc command which
+				// indicates shell completion has been requested.
+				plugin.SetupPluginCompletion(cmd, args)
+			}
+
 			return initProfiling()
 		},
 		PersistentPostRunE: func(*cobra.Command, []string) error {
@@ -322,13 +368,6 @@ func NewKubectlCommand(o KubectlOptions) *cobra.Command {
 	addCmdHeaderHooks(cmds, kubeConfigFlags)
 
 	f := cmdutil.NewFactory(matchVersionKubeConfigFlags)
-
-	// Sending in 'nil' for the getLanguageFn() results in using
-	// the LANG environment variable.
-	//
-	// TODO: Consider adding a flag or file preference for setting
-	// the language, instead of just loading from the LANG env. variable.
-	i18n.LoadTranslations("kubectl", nil)
 
 	// Proxy command is incompatible with CommandHeaderRoundTripper, so
 	// clear the WrapConfigFn before running proxy command.
@@ -392,6 +431,7 @@ func NewKubectlCommand(o KubectlOptions) *cobra.Command {
 				cp.NewCmdCp(f, o.IOStreams),
 				auth.NewCmdAuth(f, o.IOStreams),
 				debug.NewCmdDebug(f, o.IOStreams),
+				events.NewCmdEvents(f, o.IOStreams),
 			},
 		},
 		{
@@ -498,7 +538,7 @@ func registerCompletionFuncForGlobalFlags(cmd *cobra.Command, f cmdutil.Factory)
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc(
 		"namespace",
 		func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
-			return utilcomp.CompGetResource(f, cmd, "namespace", toComplete), cobra.ShellCompDirectiveNoFileComp
+			return utilcomp.CompGetResource(f, "namespace", toComplete), cobra.ShellCompDirectiveNoFileComp
 		}))
 	cmdutil.CheckErr(cmd.RegisterFlagCompletionFunc(
 		"context",

@@ -19,6 +19,7 @@ package prober
 import (
 	"context"
 	"fmt"
+	"io/ioutil"
 	"net"
 	"net/http"
 	"sync"
@@ -32,13 +33,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/record"
-	"k8s.io/kubernetes/pkg/kubelet/configmap"
 	kubepod "k8s.io/kubernetes/pkg/kubelet/pod"
-	podtest "k8s.io/kubernetes/pkg/kubelet/pod/testing"
 	"k8s.io/kubernetes/pkg/kubelet/prober/results"
-	"k8s.io/kubernetes/pkg/kubelet/secret"
 	"k8s.io/kubernetes/pkg/kubelet/status"
 	statustest "k8s.io/kubernetes/pkg/kubelet/status/testing"
+	kubeletutil "k8s.io/kubernetes/pkg/kubelet/util"
 	utilpointer "k8s.io/utils/pointer"
 )
 
@@ -73,10 +72,6 @@ func TestTCPPortExhaustion(t *testing.T) {
 		numContainers = 600
 	)
 
-	if testing.Short() {
-		t.Skip("skipping TCP port exhaustion in short mode")
-	}
-
 	tests := []struct {
 		name string
 		http bool // it can be tcp or http
@@ -86,9 +81,16 @@ func TestTCPPortExhaustion(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(fmt.Sprintf(tt.name), func(t *testing.T) {
-			podManager := kubepod.NewBasicPodManager(podtest.NewFakeMirrorClient(), secret.NewFakeManager(), configmap.NewFakeManager())
+			testRootDir := ""
+			if tempDir, err := ioutil.TempDir("", "kubelet_test."); err != nil {
+				t.Fatalf("can't make a temp rootdir: %v", err)
+			} else {
+				testRootDir = tempDir
+			}
+			podManager := kubepod.NewBasicPodManager(nil)
+			podStartupLatencyTracker := kubeletutil.NewPodStartupLatencyTracker()
 			m := NewManager(
-				status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}),
+				status.NewManager(&fake.Clientset{}, podManager, &statustest.FakePodDeletionSafetyProvider{}, podStartupLatencyTracker, testRootDir),
 				results.NewManager(),
 				results.NewManager(),
 				results.NewManager(),
@@ -254,9 +256,8 @@ func (f *fakePod) probeHandler() v1.ProbeHandler {
 	if f.http {
 		handler = v1.ProbeHandler{
 			HTTPGet: &v1.HTTPGetAction{
-				Scheme: v1.URISchemeHTTP,
-				Host:   "127.0.0.1",
-				Port:   intstr.FromInt(port),
+				Host: "127.0.0.1",
+				Port: intstr.FromInt(port),
 			},
 		}
 	} else {

@@ -27,7 +27,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 
 	"net/http"
-	"net/url"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -43,7 +42,7 @@ type fakeHttpProber struct {
 	err    error
 }
 
-func (f *fakeHttpProber) Probe(*url.URL, http.Header, time.Duration) (probe.Result, string, error) {
+func (f *fakeHttpProber) Probe(*http.Request, time.Duration) (probe.Result, string, error) {
 	return f.result, f.body, f.err
 }
 
@@ -60,9 +59,9 @@ func NewTestREST(resp testResponse) *REST {
 		err:    resp.err,
 	}
 	return &REST{
-		GetServersToValidate: func() map[string]*Server {
-			return map[string]*Server{
-				"test1": {Addr: "testserver1", Port: 8000, Path: "/healthz", Prober: prober},
+		GetServersToValidate: func() map[string]Server {
+			return map[string]Server{
+				"test1": &HttpServer{Addr: "testserver1", Port: 8000, Path: "/healthz", Prober: prober},
 			}
 		},
 	}

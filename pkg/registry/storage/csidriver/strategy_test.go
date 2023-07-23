@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	genericapirequest "k8s.io/apiserver/pkg/endpoints/request"
@@ -40,6 +41,7 @@ func getValidCSIDriver(name string) *storage.CSIDriver {
 			PodInfoOnMount:    &enabled,
 			StorageCapacity:   &enabled,
 			RequiresRepublish: &enabled,
+			SELinuxMount:      &enabled,
 		},
 	}
 }
@@ -281,6 +283,7 @@ func TestCSIDriverValidation(t *testing.T) {
 					PodInfoOnMount:    &enabled,
 					StorageCapacity:   &enabled,
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			false,
@@ -296,6 +299,7 @@ func TestCSIDriverValidation(t *testing.T) {
 					PodInfoOnMount:    &disabled,
 					StorageCapacity:   &disabled,
 					RequiresRepublish: &disabled,
+					SELinuxMount:      &disabled,
 				},
 			},
 			false,
@@ -311,6 +315,7 @@ func TestCSIDriverValidation(t *testing.T) {
 					PodInfoOnMount:    &enabled,
 					StorageCapacity:   &enabled,
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			true,
@@ -329,6 +334,7 @@ func TestCSIDriverValidation(t *testing.T) {
 						storage.VolumeLifecycleMode("no-such-mode"),
 					},
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			true,
@@ -347,6 +353,7 @@ func TestCSIDriverValidation(t *testing.T) {
 						storage.VolumeLifecyclePersistent,
 					},
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			false,
@@ -365,6 +372,7 @@ func TestCSIDriverValidation(t *testing.T) {
 						storage.VolumeLifecycleEphemeral,
 					},
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			false,
@@ -384,6 +392,7 @@ func TestCSIDriverValidation(t *testing.T) {
 						storage.VolumeLifecycleEphemeral,
 					},
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			false,
@@ -400,14 +409,32 @@ func TestCSIDriverValidation(t *testing.T) {
 					StorageCapacity:   &enabled,
 					TokenRequests:     []storage.TokenRequest{{Audience: gcp}},
 					RequiresRepublish: &enabled,
+					SELinuxMount:      &enabled,
 				},
 			},
 			false,
+		},
+		{
+			"invalid SELinuxMount",
+			&storage.CSIDriver{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "foo",
+				},
+				Spec: storage.CSIDriverSpec{
+					AttachRequired:  &enabled,
+					PodInfoOnMount:  &enabled,
+					StorageCapacity: &enabled,
+					SELinuxMount:    nil,
+				},
+			},
+			true,
 		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			// assume this feature is on for this test, detailed enabled/disabled tests in TestCSIDriverValidationSELinuxMountEnabledDisabled
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.SELinuxMountReadWriteOncePod, true)()
 
 			testValidation := func(csiDriver *storage.CSIDriver, apiVersion string) field.ErrorList {
 				ctx := genericapirequest.WithRequestInfo(genericapirequest.NewContext(), &genericapirequest.RequestInfo{

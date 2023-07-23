@@ -26,6 +26,7 @@ import (
 
 	"k8s.io/klog/v2"
 
+	nodeutil "k8s.io/component-helpers/node/util"
 	kubeadmapi "k8s.io/kubernetes/cmd/kubeadm/app/apis/kubeadm"
 	"k8s.io/kubernetes/cmd/kubeadm/app/constants"
 	"k8s.io/kubernetes/cmd/kubeadm/app/images"
@@ -45,7 +46,7 @@ type kubeletFlagsOpts struct {
 // - "hostname-override" flag in NodeRegistrationOptions.KubeletExtraArgs
 // It also returns the hostname or an error if getting the hostname failed.
 func GetNodeNameAndHostname(cfg *kubeadmapi.NodeRegistrationOptions) (string, string, error) {
-	hostname, err := kubeadmutil.GetHostname("")
+	hostname, err := nodeutil.GetHostname("")
 	nodeName := hostname
 	if cfg.Name != "" {
 		nodeName = cfg.Name
@@ -76,8 +77,6 @@ func WriteKubeletDynamicEnvFile(cfg *kubeadmapi.ClusterConfiguration, nodeReg *k
 func buildKubeletArgMapCommon(opts kubeletFlagsOpts) map[string]string {
 	kubeletFlags := map[string]string{}
 	kubeletFlags["container-runtime-endpoint"] = opts.nodeRegOpts.CRISocket
-	// container runtime is by default docker in kubelet v1.23, so it can be removed in v1.26
-	kubeletFlags["container-runtime"] = "remote"
 
 	// This flag passes the pod infra container image (e.g. "pause" image) to the kubelet
 	// and prevents its garbage collection

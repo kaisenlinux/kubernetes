@@ -34,8 +34,8 @@ import (
 
 var (
 	successConfig = kubeletconfig.KubeletConfiguration{
-		CgroupsPerQOS:                   true,
-		EnforceNodeAllocatable:          []string{"pods", "system-reserved", "kube-reserved"},
+		CgroupsPerQOS:                   cgroupsPerQOS,
+		EnforceNodeAllocatable:          enforceNodeAllocatable,
 		SystemReservedCgroup:            "/system.slice",
 		KubeReservedCgroup:              "/kubelet.service",
 		SystemCgroups:                   "",
@@ -57,6 +57,7 @@ var (
 		ReadOnlyPort:                    0,
 		RegistryBurst:                   10,
 		RegistryPullQPS:                 5,
+		MaxParallelImagePulls:           nil,
 		HairpinMode:                     kubeletconfig.PromiscuousBridge,
 		NodeLeaseDurationSeconds:        1,
 		CPUCFSQuotaPeriod:               metav1.Duration{Duration: 25 * time.Millisecond},
@@ -64,7 +65,7 @@ var (
 		TopologyManagerPolicy:           kubeletconfig.SingleNumaNodeTopologyManagerPolicy,
 		ShutdownGracePeriod:             metav1.Duration{Duration: 30 * time.Second},
 		ShutdownGracePeriodCriticalPods: metav1.Duration{Duration: 10 * time.Second},
-		MemoryThrottlingFactor:          utilpointer.Float64Ptr(0.8),
+		MemoryThrottlingFactor:          utilpointer.Float64(0.9),
 		FeatureGates: map[string]bool{
 			"CustomCPUCFSQuotaPeriod": true,
 			"GracefulNodeShutdown":    true,
@@ -73,6 +74,7 @@ var (
 		Logging: logsapi.LoggingConfiguration{
 			Format: "text",
 		},
+		ContainerRuntimeEndpoint: "unix:///run/containerd/containerd.sock",
 	}
 )
 
@@ -157,7 +159,7 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 				conf.CPUCFSQuotaPeriod = metav1.Duration{Duration: 2 * time.Second}
 				return conf
 			},
-			errMsg: "invalid configuration: cpuCFSQuotaPeriod (--cpu-cfs-quota-period) {2s} must be between 1usec and 1sec, inclusive",
+			errMsg: "invalid configuration: cpuCFSQuotaPeriod (--cpu-cfs-quota-period) {2s} must be between 1ms and 1sec, inclusive",
 		},
 		{
 			name: "invalid ImageGCHighThresholdPercent",
@@ -298,6 +300,31 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			errMsg: "invalid configuration: registryPullQPS (--registry-qps) -1 must not be a negative number",
 		},
 		{
+			name: "invalid MaxParallelImagePulls",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.MaxParallelImagePulls = utilpointer.Int32(0)
+				return conf
+			},
+			errMsg: "invalid configuration: maxParallelImagePulls 0 must be a positive number",
+		},
+		{
+			name: "invalid MaxParallelImagePulls and SerializeImagePulls combination",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.MaxParallelImagePulls = utilpointer.Int32(3)
+				conf.SerializeImagePulls = true
+				return conf
+			},
+			errMsg: "invalid configuration: maxParallelImagePulls cannot be larger than 1 unless SerializeImagePulls (--serialize-image-pulls) is set to false",
+		},
+		{
+			name: "valid MaxParallelImagePulls and SerializeImagePulls combination",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.MaxParallelImagePulls = utilpointer.Int32(1)
+				conf.SerializeImagePulls = true
+				return conf
+			},
+		},
+		{
 			name: "specify ServerTLSBootstrap without enabling RotateKubeletServerCertificate",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
 				conf.FeatureGates = map[string]bool{"RotateKubeletServerCertificate": false}
@@ -307,30 +334,12 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 			errMsg: "invalid configuration: serverTLSBootstrap true requires feature gate RotateKubeletServerCertificate",
 		},
 		{
-			name: "use SingleNumaNodeTopologyManagerPolicy without enabling TopologyManager",
-			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"TopologyManager": false}
-				conf.TopologyManagerPolicy = kubeletconfig.SingleNumaNodeTopologyManagerPolicy
-				return conf
-			},
-			errMsg: "invalid configuration: topologyManagerPolicy single-numa-node requires feature gate TopologyManager",
-		},
-		{
 			name: "invalid TopologyManagerPolicy",
 			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
 				conf.TopologyManagerPolicy = "invalid-policy"
 				return conf
 			},
 			errMsg: "invalid configuration: topologyManagerPolicy (--topology-manager-policy) \"invalid-policy\" must be one of: [\"none\" \"best-effort\" \"restricted\" \"single-numa-node\"]",
-		},
-		{
-			name: "use PodTopologyManagerScope without enabling TopologyManager",
-			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
-				conf.FeatureGates = map[string]bool{"TopologyManager": false}
-				conf.TopologyManagerScope = kubeletconfig.PodTopologyManagerScope
-				return conf
-			},
-			errMsg: "invalid configuration: topologyManagerScope pod requires feature gate TopologyManager",
 		},
 		{
 			name: "invalid TopologyManagerScope",
@@ -527,6 +536,50 @@ func TestValidateKubeletConfiguration(t *testing.T) {
 				return conf
 			},
 			errMsg: "tracing.endpoint: Invalid value: \"dn%2s://localhost:4317\": parse \"dn%2s://localhost:4317\": first path segment in URL cannot contain colon",
+		},
+		{
+			name: "invalid GracefulNodeShutdownBasedOnPodPriority",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"GracefulNodeShutdownBasedOnPodPriority": true}
+				conf.ShutdownGracePeriodByPodPriority = []kubeletconfig.ShutdownGracePeriodByPodPriority{
+					{
+						Priority:                   0,
+						ShutdownGracePeriodSeconds: 0,
+					}}
+				return conf
+			},
+			errMsg: "invalid configuration: Cannot specify both shutdownGracePeriodByPodPriority and shutdownGracePeriod at the same time",
+		},
+		{
+			name: "Specifying shutdownGracePeriodByPodPriority without enable GracefulNodeShutdownBasedOnPodPriority",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"GracefulNodeShutdownBasedOnPodPriority": false}
+				conf.ShutdownGracePeriodByPodPriority = []kubeletconfig.ShutdownGracePeriodByPodPriority{
+					{
+						Priority:                   0,
+						ShutdownGracePeriodSeconds: 0,
+					}}
+				return conf
+			},
+			errMsg: "invalid configuration: Specifying shutdownGracePeriodByPodPriority requires feature gate GracefulNodeShutdownBasedOnPodPriority",
+		},
+		{
+			name: "enableSystemLogQuery is enabled without NodeLogQuery feature gate",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.EnableSystemLogQuery = true
+				return conf
+			},
+			errMsg: "invalid configuration: NodeLogQuery feature gate is required for enableSystemLogHandler",
+		},
+		{
+			name: "enableSystemLogQuery is enabled without enableSystemLogHandler",
+			configure: func(conf *kubeletconfig.KubeletConfiguration) *kubeletconfig.KubeletConfiguration {
+				conf.FeatureGates = map[string]bool{"NodeLogQuery": true}
+				conf.EnableSystemLogHandler = false
+				conf.EnableSystemLogQuery = true
+				return conf
+			},
+			errMsg: "invalid configuration: enableSystemLogHandler is required for enableSystemLogQuery",
 		},
 	}
 

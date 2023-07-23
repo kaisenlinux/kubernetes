@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -83,6 +82,11 @@ var (
 
 		# Check to see if I can list deployments in my current namespace
 		kubectl auth can-i list deployments.apps
+
+		# Check to see if service account "foo" of namespace "dev" can list pods
+		# in the namespace "prod".
+		# You must be allowed to use impersonation for the global option "--as".
+		kubectl auth can-i list pods --as=system:serviceaccount:dev:foo -n prod
 
 		# Check to see if I can do everything in my current namespace ("*" means all)
 		kubectl auth can-i '*' '*'
@@ -157,7 +161,7 @@ func (o *CanIOptions) Complete(f cmdutil.Factory, args []string) error {
 		}
 	} else {
 		if o.Quiet {
-			o.Out = ioutil.Discard
+			o.Out = io.Discard
 		}
 
 		switch len(args) {
@@ -177,7 +181,9 @@ func (o *CanIOptions) Complete(f cmdutil.Factory, args []string) error {
 				o.ResourceName = resourceTokens[1]
 			}
 		default:
-			return errors.New("you must specify two or three arguments: verb, resource, and optional resourceName")
+			errString := "you must specify two arguments: verb resource or verb resource/resourceName."
+			usageString := "See 'kubectl auth can-i -h' for help and examples."
+			return errors.New(fmt.Sprintf("%s\n%s", errString, usageString))
 		}
 	}
 

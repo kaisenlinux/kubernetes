@@ -23,15 +23,16 @@ import (
 	"fmt"
 	"io"
 	"io/ioutil"
-	apitesting "k8s.io/cri-api/pkg/apis/testing"
-	"k8s.io/utils/pointer"
 	"os"
 	"testing"
 	"time"
 
+	v1 "k8s.io/api/core/v1"
+	apitesting "k8s.io/cri-api/pkg/apis/testing"
+	"k8s.io/utils/pointer"
+
 	"github.com/stretchr/testify/assert"
 
-	"k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtimeapi "k8s.io/cri-api/pkg/apis/runtime/v1"
 )
@@ -75,7 +76,7 @@ func TestLogOptions(t *testing.T) {
 }
 
 func TestReadLogs(t *testing.T) {
-	file, err := ioutil.TempFile("", "TestFollowLogs")
+	file, err := os.CreateTemp("", "TestFollowLogs")
 	if err != nil {
 		t.Fatalf("unable to create temp file")
 	}
@@ -97,42 +98,42 @@ func TestReadLogs(t *testing.T) {
 		{
 			name: "using TailLines 2 should output last 2 lines",
 			podLogOptions: v1.PodLogOptions{
-				TailLines: pointer.Int64Ptr(2),
+				TailLines: pointer.Int64(2),
 			},
 			expected: "line2\nline3\n",
 		},
 		{
 			name: "using TailLines 4 should output all lines when the log has less than 4 lines",
 			podLogOptions: v1.PodLogOptions{
-				TailLines: pointer.Int64Ptr(4),
+				TailLines: pointer.Int64(4),
 			},
 			expected: "line1\nline2\nline3\n",
 		},
 		{
 			name: "using TailLines 0 should output nothing",
 			podLogOptions: v1.PodLogOptions{
-				TailLines: pointer.Int64Ptr(0),
+				TailLines: pointer.Int64(0),
 			},
 			expected: "",
 		},
 		{
 			name: "using LimitBytes 9 should output first 9 bytes",
 			podLogOptions: v1.PodLogOptions{
-				LimitBytes: pointer.Int64Ptr(9),
+				LimitBytes: pointer.Int64(9),
 			},
 			expected: "line1\nlin",
 		},
 		{
 			name: "using LimitBytes 100 should output all bytes when the log has less than 100 bytes",
 			podLogOptions: v1.PodLogOptions{
-				LimitBytes: pointer.Int64Ptr(100),
+				LimitBytes: pointer.Int64(100),
 			},
 			expected: "line1\nline2\nline3\n",
 		},
 		{
 			name: "using LimitBytes 0 should output nothing",
 			podLogOptions: v1.PodLogOptions{
-				LimitBytes: pointer.Int64Ptr(0),
+				LimitBytes: pointer.Int64(0),
 			},
 			expected: "",
 		},
@@ -161,7 +162,7 @@ func TestReadLogs(t *testing.T) {
 			name: "using follow combined with TailLines 2 should output the last 2 lines",
 			podLogOptions: v1.PodLogOptions{
 				Follow:    true,
-				TailLines: pointer.Int64Ptr(2),
+				TailLines: pointer.Int64(2),
 			},
 			expected: "line2\nline3\n",
 		},

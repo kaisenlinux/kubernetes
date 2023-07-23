@@ -104,7 +104,7 @@ func makeTransport(config *KubeletClientConfig, insecureSkipTLSVerify bool) (htt
 			return nil, fmt.Errorf("failed to get context dialer for 'cluster': got %v", err)
 		}
 		if dialer != nil {
-			transportConfig.Dial = dialer
+			transportConfig.DialHolder = &transport.DialHolder{Dial: dialer}
 		}
 	}
 	return transport.New(transportConfig)

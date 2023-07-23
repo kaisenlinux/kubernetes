@@ -20,6 +20,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
+	"github.com/google/go-cmp/cmp/cmpopts"
 	v1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,15 +41,35 @@ import (
 func TestPodGcOrphanedPodsWithFinalizer(t *testing.T) {
 	tests := map[string]struct {
 		enablePodDisruptionConditions bool
+		phase                         v1.PodPhase
 		wantPhase                     v1.PodPhase
+		wantDisruptionTarget          *v1.PodCondition
 	}{
 		"PodDisruptionConditions enabled": {
 			enablePodDisruptionConditions: true,
+			phase:                         v1.PodPending,
 			wantPhase:                     v1.PodFailed,
+			wantDisruptionTarget: &v1.PodCondition{
+				Type:    v1.DisruptionTarget,
+				Status:  v1.ConditionTrue,
+				Reason:  "DeletionByPodGC",
+				Message: "PodGC: node no longer exists",
+			},
 		},
 		"PodDisruptionConditions disabled": {
 			enablePodDisruptionConditions: false,
+			phase:                         v1.PodPending,
 			wantPhase:                     v1.PodPending,
+		},
+		"PodDisruptionConditions enabled; succeeded pod": {
+			enablePodDisruptionConditions: true,
+			phase:                         v1.PodSucceeded,
+			wantPhase:                     v1.PodSucceeded,
+		},
+		"PodDisruptionConditions enabled; failed pod": {
+			enablePodDisruptionConditions: true,
+			phase:                         v1.PodFailed,
+			wantPhase:                     v1.PodFailed,
 		},
 	}
 
@@ -95,7 +117,12 @@ func TestPodGcOrphanedPodsWithFinalizer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error %v, while creating pod: %v", err, klog.KObj(pod))
 			}
-			defer testutils.RemovePodFinalizers(testCtx.ClientSet, t, []*v1.Pod{pod})
+			defer testutils.RemovePodFinalizers(testCtx.Ctx, testCtx.ClientSet, t, *pod)
+
+			pod.Status.Phase = test.phase
+			if _, err := testCtx.ClientSet.CoreV1().Pods(testCtx.NS.Name).UpdateStatus(testCtx.Ctx, pod, metav1.UpdateOptions{}); err != nil {
+				t.Fatalf("Error %v, while setting phase %v for pod: %v", err, test.phase, klog.KObj(pod))
+			}
 
 			// we delete the node to orphan the pod
 			err = cs.CoreV1().Nodes().Delete(testCtx.Ctx, pod.Spec.NodeName, metav1.DeleteOptions{})
@@ -110,11 +137,9 @@ func TestPodGcOrphanedPodsWithFinalizer(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Error: '%v' while updating pod info: '%v'", err, klog.KObj(pod))
 			}
-			_, cond := podutil.GetPodCondition(&pod.Status, v1.AlphaNoCompatGuaranteeDisruptionTarget)
-			if test.enablePodDisruptionConditions == true && cond == nil {
-				t.Errorf("Pod %q does not have the expected condition: %q", klog.KObj(pod), v1.AlphaNoCompatGuaranteeDisruptionTarget)
-			} else if test.enablePodDisruptionConditions == false && cond != nil {
-				t.Errorf("Pod %q has an unexpected condition: %q", klog.KObj(pod), v1.AlphaNoCompatGuaranteeDisruptionTarget)
+			_, gotDisruptionTarget := podutil.GetPodCondition(&pod.Status, v1.DisruptionTarget)
+			if diff := cmp.Diff(test.wantDisruptionTarget, gotDisruptionTarget, cmpopts.IgnoreFields(v1.PodCondition{}, "LastTransitionTime")); diff != "" {
+				t.Errorf("Pod %v has unexpected DisruptionTarget condition: %s", klog.KObj(pod), diff)
 			}
 			if pod.Status.Phase != test.wantPhase {
 				t.Errorf("Unexpected phase for pod %q. Got: %q, want: %q", klog.KObj(pod), pod.Status.Phase, test.wantPhase)
@@ -135,8 +160,8 @@ func TestTerminatingOnOutOfServiceNode(t *testing.T) {
 			withFinalizer:                 true,
 			wantPhase:                     v1.PodFailed,
 		},
-		"pod has phase when PodDisruptionConditions disabled": {
-			enablePodDisruptionConditions: true,
+		"pod has phase unchanged when PodDisruptionConditions disabled": {
+			enablePodDisruptionConditions: false,
 			withFinalizer:                 true,
 			wantPhase:                     v1.PodPending,
 		},
@@ -201,7 +226,7 @@ func TestTerminatingOnOutOfServiceNode(t *testing.T) {
 				t.Fatalf("Error %v, while creating pod: %v", err, klog.KObj(pod))
 			}
 			if test.withFinalizer {
-				defer testutils.RemovePodFinalizers(testCtx.ClientSet, t, []*v1.Pod{pod})
+				defer testutils.RemovePodFinalizers(testCtx.Ctx, testCtx.ClientSet, t, *pod)
 			}
 
 			// trigger termination of the pod, but with long grace period so that it is not removed immediately
@@ -221,7 +246,7 @@ func TestTerminatingOnOutOfServiceNode(t *testing.T) {
 			}
 			if test.withFinalizer {
 				// wait until the pod phase is set as expected
-				err = wait.PollImmediate(time.Second, time.Second*15, func() (bool, error) {
+				err = wait.Poll(time.Second, time.Second*15, func() (bool, error) {
 					var e error
 					pod, e = cs.CoreV1().Pods(pod.Namespace).Get(testCtx.Ctx, pod.Name, metav1.GetOptions{})
 					if e != nil {
@@ -232,9 +257,9 @@ func TestTerminatingOnOutOfServiceNode(t *testing.T) {
 				if err != nil {
 					t.Errorf("Error %q while waiting for the pod %q to be in expected phase", err, klog.KObj(pod))
 				}
-				_, cond := podutil.GetPodCondition(&pod.Status, v1.AlphaNoCompatGuaranteeDisruptionTarget)
+				_, cond := podutil.GetPodCondition(&pod.Status, v1.DisruptionTarget)
 				if cond != nil {
-					t.Errorf("Pod %q has an unexpected condition: %q", klog.KObj(pod), v1.AlphaNoCompatGuaranteeDisruptionTarget)
+					t.Errorf("Pod %q has an unexpected condition: %q", klog.KObj(pod), v1.DisruptionTarget)
 				}
 			} else {
 				// wait until the pod is deleted

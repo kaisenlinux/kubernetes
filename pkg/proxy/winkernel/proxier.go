@@ -49,6 +49,7 @@ import (
 	"k8s.io/kubernetes/pkg/proxy/healthcheck"
 	"k8s.io/kubernetes/pkg/proxy/metaproxier"
 	"k8s.io/kubernetes/pkg/proxy/metrics"
+	utilproxy "k8s.io/kubernetes/pkg/proxy/util"
 	"k8s.io/kubernetes/pkg/util/async"
 	netutils "k8s.io/utils/net"
 )
@@ -117,7 +118,7 @@ type loadBalancerFlags struct {
 
 // internal struct for string service information
 type serviceInfo struct {
-	*proxy.BaseServiceInfo
+	*proxy.BaseServicePortInfo
 	targetPort             int
 	externalIPs            []*externalIPInfo
 	loadBalancerIngressIPs []*loadBalancerIngressInfo
@@ -128,8 +129,8 @@ type serviceInfo struct {
 	hns                    HostNetworkService
 	preserveDIP            bool
 	localTrafficDSR        bool
-	winProxyOptimization   bool
 	internalTrafficLocal   bool
+	winProxyOptimization   bool
 }
 
 type hnsNetworkInfo struct {
@@ -377,7 +378,7 @@ func (proxier *Proxier) endpointsMapChange(oldEndpointsMap, newEndpointsMap prox
 
 func (proxier *Proxier) onEndpointsMapChange(svcPortName *proxy.ServicePortName, redundantCleanup bool) {
 
-	svc, exists := proxier.serviceMap[*svcPortName]
+	svc, exists := proxier.svcPortMap[*svcPortName]
 
 	if exists {
 		svcInfo, ok := svc.(*serviceInfo)
@@ -416,7 +417,7 @@ func (proxier *Proxier) onEndpointsMapChange(svcPortName *proxy.ServicePortName,
 	}
 }
 
-func (proxier *Proxier) serviceMapChange(previous, current proxy.ServiceMap) {
+func (proxier *Proxier) serviceMapChange(previous, current proxy.ServicePortMap) {
 	for svcPortName := range current {
 		proxier.onServiceMapChange(&svcPortName)
 	}
@@ -431,7 +432,7 @@ func (proxier *Proxier) serviceMapChange(previous, current proxy.ServiceMap) {
 
 func (proxier *Proxier) onServiceMapChange(svcPortName *proxy.ServicePortName) {
 
-	svc, exists := proxier.serviceMap[*svcPortName]
+	svc, exists := proxier.svcPortMap[*svcPortName]
 
 	if exists {
 		svcInfo, ok := svc.(*serviceInfo)
@@ -526,12 +527,12 @@ func (refCountMap endPointsReferenceCountMap) getRefCount(hnsID string) *uint16 
 }
 
 // returns a new proxy.ServicePort which abstracts a serviceInfo
-func (proxier *Proxier) newServiceInfo(port *v1.ServicePort, service *v1.Service, baseInfo *proxy.BaseServiceInfo) proxy.ServicePort {
-	info := &serviceInfo{BaseServiceInfo: baseInfo}
+func (proxier *Proxier) newServiceInfo(port *v1.ServicePort, service *v1.Service, bsvcPortInfo *proxy.BaseServicePortInfo) proxy.ServicePort {
+	info := &serviceInfo{BaseServicePortInfo: bsvcPortInfo}
 	preserveDIP := service.Annotations["preserve-destination"] == "true"
 	// Annotation introduced to enable optimized loadbalancing
 	winProxyOptimization := !(strings.ToUpper(service.Annotations["winProxyOptimization"]) == "DISABLED")
-	localTrafficDSR := service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyTypeLocal
+	localTrafficDSR := service.Spec.ExternalTrafficPolicy == v1.ServiceExternalTrafficPolicyLocal
 	var internalTrafficLocal bool
 	if service.Spec.InternalTrafficPolicy != nil {
 		internalTrafficLocal = *service.Spec.InternalTrafficPolicy == v1.ServiceInternalTrafficPolicyLocal
@@ -552,9 +553,9 @@ func (proxier *Proxier) newServiceInfo(port *v1.ServicePort, service *v1.Service
 	info.targetPort = targetPort
 	info.hns = proxier.hns
 	info.localTrafficDSR = localTrafficDSR
-	info.winProxyOptimization = winProxyOptimization
 	info.internalTrafficLocal = internalTrafficLocal
-	klog.V(3).InfoS("Flags enabled for service", "service", service.Name, "localTrafficDSR", localTrafficDSR, "winProxyOptimization", winProxyOptimization, "internalTrafficLocal", internalTrafficLocal, "preserveDIP", preserveDIP)
+	info.winProxyOptimization = winProxyOptimization
+	klog.V(3).InfoS("Flags enabled for service", "service", service.Name, "localTrafficDSR", localTrafficDSR, "internalTrafficLocal", internalTrafficLocal, "preserveDIP", preserveDIP, "winProxyOptimization", winProxyOptimization)
 
 	for _, eip := range service.Spec.ExternalIPs {
 		info.externalIPs = append(info.externalIPs, &externalIPInfo{ip: eip})
@@ -602,7 +603,7 @@ type Proxier struct {
 	serviceChanges    *proxy.ServiceChangeTracker
 	endPointsRefCount endPointsReferenceCountMap
 	mu                sync.Mutex // protects the following fields
-	serviceMap        proxy.ServiceMap
+	svcPortMap        proxy.ServicePortMap
 	endpointsMap      proxy.EndpointsMap
 	// endpointSlicesSynced and servicesSynced are set to true when corresponding
 	// objects are synced after startup. This is used to avoid updating hns policies
@@ -698,7 +699,10 @@ func NewProxier(
 		klog.InfoS("ClusterCIDR not specified, unable to distinguish between internal and external traffic")
 	}
 
-	serviceHealthServer := healthcheck.NewServiceHealthServer(hostname, recorder, []string{} /* windows listen to all node addresses */)
+	// windows listens to all node addresses
+	nodePortAddresses := utilproxy.NewNodePortAddresses(nil)
+	serviceHealthServer := healthcheck.NewServiceHealthServer(hostname, recorder, nodePortAddresses, healthzServer)
+
 	hns, supportedFeatures := newHostNetworkService()
 	hnsNetworkName, err := getNetworkName(config.NetworkName)
 	if err != nil {
@@ -777,7 +781,7 @@ func NewProxier(
 	isIPv6 := netutils.IsIPv6(nodeIP)
 	proxier := &Proxier{
 		endPointsRefCount:     make(endPointsReferenceCountMap),
-		serviceMap:            make(proxy.ServiceMap),
+		svcPortMap:            make(proxy.ServicePortMap),
 		endpointsMap:          make(proxy.EndpointsMap),
 		masqueradeAll:         masqueradeAll,
 		masqueradeMark:        masqueradeMark,
@@ -1081,7 +1085,7 @@ func (proxier *Proxier) OnEndpointSlicesSynced() {
 }
 
 func (proxier *Proxier) cleanupAllPolicies() {
-	for svcName, svc := range proxier.serviceMap {
+	for svcName, svc := range proxier.svcPortMap {
 		svcInfo, ok := svc.(*serviceInfo)
 		if !ok {
 			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
@@ -1195,15 +1199,15 @@ func (proxier *Proxier) syncProxyRules() {
 	// We assume that if this was called, we really want to sync them,
 	// even if nothing changed in the meantime. In other words, callers are
 	// responsible for detecting no-op changes and not calling this function.
-	serviceUpdateResult := proxier.serviceMap.Update(proxier.serviceChanges)
+	serviceUpdateResult := proxier.svcPortMap.Update(proxier.serviceChanges)
 	endpointUpdateResult := proxier.endpointsMap.Update(proxier.endpointsChanges)
 
-	staleServices := serviceUpdateResult.UDPStaleClusterIP
+	deletedUDPClusterIPs := serviceUpdateResult.DeletedUDPClusterIPs
 	// merge stale services gathered from updateEndpointsMap
-	for _, svcPortName := range endpointUpdateResult.StaleServiceNames {
-		if svcInfo, ok := proxier.serviceMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
-			klog.V(2).InfoS("Stale udp service", "servicePortName", svcPortName, "clusterIP", svcInfo.ClusterIP())
-			staleServices.Insert(svcInfo.ClusterIP().String())
+	for _, svcPortName := range endpointUpdateResult.NewlyActiveUDPServices {
+		if svcInfo, ok := proxier.svcPortMap[svcPortName]; ok && svcInfo != nil && svcInfo.Protocol() == v1.ProtocolUDP {
+			klog.V(2).InfoS("Newly-active UDP service may have stale conntrack entries", "servicePortName", svcPortName)
+			deletedUDPClusterIPs.Insert(svcInfo.ClusterIP().String())
 		}
 	}
 	// Query HNS for endpoints and load balancers
@@ -1238,7 +1242,7 @@ func (proxier *Proxier) syncProxyRules() {
 	klog.V(3).InfoS("Syncing Policies")
 
 	// Program HNS by adding corresponding policies for each service.
-	for svcName, svc := range proxier.serviceMap {
+	for svcName, svc := range proxier.svcPortMap {
 		svcInfo, ok := svc.(*serviceInfo)
 		if !ok {
 			klog.ErrorS(nil, "Failed to cast serviceInfo", "serviceName", svcName)
@@ -1640,16 +1644,16 @@ func (proxier *Proxier) syncProxyRules() {
 	// Update service healthchecks.  The endpoints list might include services that are
 	// not "OnlyLocal", but the services list will not, and the serviceHealthServer
 	// will just drop those endpoints.
-	if err := proxier.serviceHealthServer.SyncServices(serviceUpdateResult.HCServiceNodePorts); err != nil {
+	if err := proxier.serviceHealthServer.SyncServices(proxier.svcPortMap.HealthCheckNodePorts()); err != nil {
 		klog.ErrorS(err, "Error syncing healthcheck services")
 	}
-	if err := proxier.serviceHealthServer.SyncEndpoints(endpointUpdateResult.HCEndpointsLocalIPSize); err != nil {
+	if err := proxier.serviceHealthServer.SyncEndpoints(proxier.endpointsMap.LocalReadyEndpoints()); err != nil {
 		klog.ErrorS(err, "Error syncing healthcheck endpoints")
 	}
 
 	// Finish housekeeping.
 	// TODO: these could be made more consistent.
-	for _, svcIP := range staleServices.UnsortedList() {
+	for _, svcIP := range deletedUDPClusterIPs.UnsortedList() {
 		// TODO : Check if this is required to cleanup stale services here
 		klog.V(5).InfoS("Pending delete stale service IP connections", "IP", svcIP)
 	}

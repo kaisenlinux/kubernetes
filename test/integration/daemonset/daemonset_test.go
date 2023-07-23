@@ -39,6 +39,7 @@ import (
 	"k8s.io/client-go/tools/events"
 	"k8s.io/client-go/util/flowcontrol"
 	"k8s.io/client-go/util/retry"
+	"k8s.io/klog/v2/ktesting"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 	kubeapiservertesting "k8s.io/kubernetes/cmd/kube-apiserver/app/testing"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
@@ -49,6 +50,7 @@ import (
 	"k8s.io/kubernetes/pkg/scheduler/profile"
 	labelsutil "k8s.io/kubernetes/pkg/util/labels"
 	"k8s.io/kubernetes/test/integration/framework"
+	testutils "k8s.io/kubernetes/test/integration/util"
 )
 
 var zero = int64(0)
@@ -75,8 +77,11 @@ func setupWithServerSetup(t *testing.T, serverSetup framework.TestServerSetup) (
 	clientSet, config, closeFn := framework.StartTestServer(t, serverSetup)
 
 	resyncPeriod := 12 * time.Hour
+	_, ctx := ktesting.NewTestContext(t)
+	ctx, cancel := context.WithCancel(ctx)
 	informers := informers.NewSharedInformerFactory(clientset.NewForConfigOrDie(restclient.AddUserAgent(config, "daemonset-informers")), resyncPeriod)
 	dc, err := daemon.NewDaemonSetsController(
+		ctx,
 		informers.Apps().V1().DaemonSets(),
 		informers.Apps().V1().ControllerRevisions(),
 		informers.Core().V1().Pods(),
@@ -87,8 +92,6 @@ func setupWithServerSetup(t *testing.T, serverSetup framework.TestServerSetup) (
 	if err != nil {
 		t.Fatalf("error creating DaemonSets controller: %v", err)
 	}
-
-	ctx, cancel := context.WithCancel(context.Background())
 
 	eventBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
 		Interface: clientSet.EventsV1(),
@@ -152,6 +155,7 @@ func newDaemonSet(name, namespace string) *apps.DaemonSet {
 }
 
 func cleanupDaemonSets(t *testing.T, cs clientset.Interface, ds *apps.DaemonSet) {
+	t.Helper()
 	ds, err := cs.AppsV1().DaemonSets(ds.Namespace).Get(context.TODO(), ds.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Errorf("Failed to get DaemonSet %s/%s: %v", ds.Namespace, ds.Name, err)
@@ -171,6 +175,10 @@ func cleanupDaemonSets(t *testing.T, cs clientset.Interface, ds *apps.DaemonSet)
 	if ds, err = cs.AppsV1().DaemonSets(ds.Namespace).Update(context.TODO(), ds, metav1.UpdateOptions{}); err != nil {
 		t.Errorf("Failed to update DaemonSet %s/%s: %v", ds.Namespace, ds.Name, err)
 		return
+	}
+
+	if len(ds.Spec.Template.Finalizers) > 0 {
+		testutils.RemovePodFinalizersInNamespace(context.TODO(), cs, t, ds.Namespace)
 	}
 
 	// Wait for the daemon set controller to kill all the daemon pods.
@@ -272,9 +280,7 @@ func validateDaemonSetPodsAndMarkReady(
 ) {
 	if err := wait.Poll(time.Second, 60*time.Second, func() (bool, error) {
 		objects := podInformer.GetIndexer().List()
-		if len(objects) != numberPods {
-			return false, nil
-		}
+		nonTerminatedPods := 0
 
 		for _, object := range objects {
 			pod := object.(*v1.Pod)
@@ -291,6 +297,10 @@ func validateDaemonSetPodsAndMarkReady(
 				t.Errorf("controllerRef.Controller is not set to true")
 			}
 
+			if podutil.IsPodPhaseTerminal(pod.Status.Phase) {
+				continue
+			}
+			nonTerminatedPods++
 			if !podutil.IsPodReady(pod) && len(pod.Spec.NodeName) != 0 {
 				podCopy := pod.DeepCopy()
 				podCopy.Status = v1.PodStatus{
@@ -304,7 +314,42 @@ func validateDaemonSetPodsAndMarkReady(
 			}
 		}
 
-		return true, nil
+		return nonTerminatedPods == numberPods, nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func validateDaemonSetPodsActive(
+	podClient corev1client.PodInterface,
+	podInformer cache.SharedIndexInformer,
+	numberPods int,
+	t *testing.T,
+) {
+	if err := wait.Poll(time.Second, 60*time.Second, func() (bool, error) {
+		objects := podInformer.GetIndexer().List()
+		if len(objects) < numberPods {
+			return false, nil
+		}
+		podsActiveCount := 0
+		for _, object := range objects {
+			pod := object.(*v1.Pod)
+			ownerReferences := pod.ObjectMeta.OwnerReferences
+			if len(ownerReferences) != 1 {
+				return false, fmt.Errorf("Pod %s has %d OwnerReferences, expected only 1", pod.Name, len(ownerReferences))
+			}
+			controllerRef := ownerReferences[0]
+			if got, want := controllerRef.Kind, "DaemonSet"; got != want {
+				t.Errorf("controllerRef.Kind = %q, want %q", got, want)
+			}
+			if controllerRef.Controller == nil || *controllerRef.Controller != true {
+				t.Errorf("controllerRef.Controller is not set to true")
+			}
+			if pod.Status.Phase == v1.PodRunning || pod.Status.Phase == v1.PodPending {
+				podsActiveCount += 1
+			}
+		}
+		return podsActiveCount == numberPods, nil
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -494,6 +539,68 @@ func TestSimpleDaemonSetLaunchesPods(t *testing.T) {
 		validateDaemonSetPodsAndMarkReady(podClient, podInformer, 5, t)
 		validateDaemonSetStatus(dsClient, ds.Name, 5, t)
 	})
+}
+
+func TestSimpleDaemonSetRestartsPodsOnTerminalPhase(t *testing.T) {
+	cases := map[string]struct {
+		phase     v1.PodPhase
+		finalizer bool
+	}{
+		"Succeeded": {
+			phase: v1.PodSucceeded,
+		},
+		"Failed": {
+			phase: v1.PodFailed,
+		},
+		"Succeeded with finalizer": {
+			phase:     v1.PodSucceeded,
+			finalizer: true,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			forEachStrategy(t, func(t *testing.T, strategy *apps.DaemonSetUpdateStrategy) {
+				ctx, closeFn, dc, informers, clientset := setup(t)
+				defer closeFn()
+				ns := framework.CreateNamespaceOrDie(clientset, "daemonset-restart-terminal-pod-test", t)
+				defer framework.DeleteNamespaceOrDie(clientset, ns, t)
+
+				dsClient := clientset.AppsV1().DaemonSets(ns.Name)
+				podClient := clientset.CoreV1().Pods(ns.Name)
+				nodeClient := clientset.CoreV1().Nodes()
+				podInformer := informers.Core().V1().Pods().Informer()
+
+				informers.Start(ctx.Done())
+				go dc.Run(ctx, 2)
+
+				ds := newDaemonSet("restart-terminal-pod", ns.Name)
+				if tc.finalizer {
+					ds.Spec.Template.Finalizers = append(ds.Spec.Template.Finalizers, "test.k8s.io/finalizer")
+				}
+				ds.Spec.UpdateStrategy = *strategy
+				if _, err := dsClient.Create(ctx, ds, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("Failed to create DaemonSet: %v", err)
+				}
+				defer cleanupDaemonSets(t, clientset, ds)
+
+				numNodes := 3
+				addNodes(nodeClient, 0, numNodes, nil, t)
+
+				validateDaemonSetPodsAndMarkReady(podClient, podInformer, numNodes, t)
+				validateDaemonSetStatus(dsClient, ds.Name, int32(numNodes), t)
+				podToMarkAsTerminal := podInformer.GetIndexer().List()[0].(*v1.Pod)
+				podCopy := podToMarkAsTerminal.DeepCopy()
+				podCopy.Status.Phase = tc.phase
+				if _, err := podClient.UpdateStatus(ctx, podCopy, metav1.UpdateOptions{}); err != nil {
+					t.Fatalf("Failed to mark the pod as terminal with phase: %v. Error: %v", tc.phase, err)
+				}
+				// verify all pods are active. They either continue Running or are Pending after restart
+				validateDaemonSetPodsActive(podClient, podInformer, numNodes, t)
+				validateDaemonSetPodsAndMarkReady(podClient, podInformer, numNodes, t)
+				validateDaemonSetStatus(dsClient, ds.Name, int32(numNodes), t)
+			})
+		})
+	}
 }
 
 func TestDaemonSetWithNodeSelectorLaunchesPods(t *testing.T) {
@@ -864,23 +971,30 @@ func TestDSCUpdatesPodLabelAfterDedupCurHistories(t *testing.T) {
 		t.Fatalf("Failed to update the pod label after new controllerrevision is created: %v", err)
 	}
 
-	revs, err := clientset.AppsV1().ControllerRevisions(ds.Namespace).List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("Failed to list controllerrevision: %v", err)
-	}
-	if revs.Size() == 0 {
-		t.Fatalf("No avaialable controllerrevision")
-	}
+	err = wait.PollImmediate(1*time.Second, 10*time.Second, func() (bool, error) {
+		revs, err := clientset.AppsV1().ControllerRevisions(ds.Namespace).List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			return false, fmt.Errorf("failed to list controllerrevision: %v", err)
+		}
+		if revs.Size() == 0 {
+			return false, fmt.Errorf("no avaialable controllerrevision")
+		}
 
-	for _, rev := range revs.Items {
-		t.Logf("revision: %v;hash: %v", rev.Name, rev.ObjectMeta.Labels[apps.DefaultDaemonSetUniqueLabelKey])
-		for _, oref := range rev.OwnerReferences {
-			if oref.Kind == "DaemonSet" && oref.UID == ds.UID {
-				if rev.Name != newName {
-					t.Fatalf("duplicate controllerrevision is not deleted")
+		for _, rev := range revs.Items {
+			t.Logf("revision: %v;hash: %v", rev.Name, rev.ObjectMeta.Labels[apps.DefaultDaemonSetUniqueLabelKey])
+			for _, oref := range rev.OwnerReferences {
+				if oref.Kind == "DaemonSet" && oref.UID == ds.UID {
+					if rev.Name != newName {
+						t.Logf("waiting for duplicate controllerrevision %v to be deleted", newName)
+						return false, nil
+					}
 				}
 			}
 		}
+		return true, nil
+	})
+	if err != nil {
+		t.Fatalf("Failed to check that duplicate controllerrevision is not deleted: %v", err)
 	}
 }
 

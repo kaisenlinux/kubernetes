@@ -43,12 +43,12 @@ kube::version::get_version_vars() {
   # Disabled as we're not expanding these at runtime, but rather expecting
   # that another tool may have expanded these and rewritten the source (!)
   if [[ '%' == "%" ]]; then
-    KUBE_GIT_COMMIT='a1a87a0a2bcd605820920c6b0e618a8ab7d117d4'
+    KUBE_GIT_COMMIT='fa3d7990104d7c1f16943a67f11b154b71f6a132'
     KUBE_GIT_TREE_STATE="archive"
-    # When a 'git archive' is exported, the 'tag: v1.25.9' below will look
+    # When a 'git archive' is exported, the 'tag: v1.27.4' below will look
     # something like 'HEAD -> release-1.8, tag: v1.8.3' where then 'tag: '
     # can be extracted from it.
-    if [[ 'tag: v1.25.9' =~ tag:\ (v[^ ,]+) ]]; then
+    if [[ 'tag: v1.27.4' =~ tag:\ (v[^ ,]+) ]]; then
      KUBE_GIT_VERSION="${BASH_REMATCH[1]}"
     fi
   fi
@@ -163,7 +163,9 @@ kube::version::ldflags() {
     )
   }
 
-  add_ldflag "buildDate" "$(date ${SOURCE_DATE_EPOCH:+"--date=@${SOURCE_DATE_EPOCH}"} -u +'%Y-%m-%dT%H:%M:%SZ')"
+  kube::util::ensure-gnu-date
+
+  add_ldflag "buildDate" "$(${DATE} ${SOURCE_DATE_EPOCH:+"--date=@${SOURCE_DATE_EPOCH}"} -u +'%Y-%m-%dT%H:%M:%SZ')"
   if [[ -n ${KUBE_GIT_COMMIT-} ]]; then
     add_ldflag "gitCommit" "${KUBE_GIT_COMMIT}"
     add_ldflag "gitTreeState" "${KUBE_GIT_TREE_STATE}"

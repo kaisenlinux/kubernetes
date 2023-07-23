@@ -193,11 +193,25 @@ func TestValidateStatefulSet(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "ordinals.start positive value",
+			set: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc-123", Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.ParallelPodManagement,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					Replicas:            3,
+					Ordinals:            &apps.StatefulSetOrdinals{Start: 2},
+				},
+			},
+		},
 	}
 
 	errorCases := []testCase{
 		{
-			name: "zero-length ID",
+			name: "zero-length name",
 			set: apps.StatefulSet{
 				ObjectMeta: metav1.ObjectMeta{Name: "", Namespace: metav1.NamespaceDefault},
 				Spec: apps.StatefulSetSpec{
@@ -209,6 +223,36 @@ func TestValidateStatefulSet(t *testing.T) {
 			},
 			errs: field.ErrorList{
 				field.Required(field.NewPath("metadata", "name"), ""),
+			},
+		},
+		{
+			name: "name-with-dots",
+			set: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc.123", Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+				},
+			},
+			errs: field.ErrorList{
+				field.Invalid(field.NewPath("metadata", "name"), "abc.123", ""),
+			},
+		},
+		{
+			name: "long name",
+			set: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: strings.Repeat("a", 64), Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+				},
+			},
+			errs: field.ErrorList{
+				field.Invalid(field.NewPath("metadata", "name"), strings.Repeat("a", 64), ""),
 			},
 		},
 		{
@@ -633,6 +677,23 @@ func TestValidateStatefulSet(t *testing.T) {
 			},
 			errs: field.ErrorList{
 				field.Invalid(field.NewPath("spec", "updateStrategy", "rollingUpdate", "maxUnavailable"), nil, ""),
+			},
+		},
+		{
+			name: "invalid ordinals.start ",
+			set: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc-123", Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.ParallelPodManagement,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					Replicas:            3,
+					Ordinals:            &apps.StatefulSetOrdinals{Start: -2},
+				},
+			},
+			errs: field.ErrorList{
+				field.Invalid(field.NewPath("spec", "ordinals.start"), nil, ""),
 			},
 		},
 	}
@@ -1124,6 +1185,51 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "update existing instance with now-invalid name",
+			old: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc.123.example", Namespace: metav1.NamespaceDefault, Finalizers: []string{"final"}},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+				},
+			},
+			update: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc.123.example", Namespace: metav1.NamespaceDefault, Finalizers: []string{}},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+				},
+			},
+		},
+		{
+			name: "update existing instance with .spec.ordinals.start",
+			old: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc.123.example", Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+				},
+			},
+			update: apps.StatefulSet{
+				ObjectMeta: metav1.ObjectMeta{Name: "abc.123.example", Namespace: metav1.NamespaceDefault},
+				Spec: apps.StatefulSetSpec{
+					PodManagementPolicy: apps.OrderedReadyPodManagement,
+					Selector:            &metav1.LabelSelector{MatchLabels: validLabels},
+					Template:            validPodTemplate.Template,
+					UpdateStrategy:      apps.StatefulSetUpdateStrategy{Type: apps.RollingUpdateStatefulSetStrategyType},
+					Ordinals: &apps.StatefulSetOrdinals{
+						Start: 3,
+					},
+				},
+			},
+		},
 	}
 
 	errorCases := []testCase{
@@ -1351,7 +1457,11 @@ func TestValidateStatefulSetUpdate(t *testing.T) {
 		},
 	}
 
-	cmpOpts := []cmp.Option{cmpopts.IgnoreFields(field.Error{}, "BadValue", "Detail"), cmpopts.SortSlices(func(a, b *field.Error) bool { return a.Error() < b.Error() })}
+	cmpOpts := []cmp.Option{
+		cmpopts.IgnoreFields(field.Error{}, "BadValue", "Detail"),
+		cmpopts.SortSlices(func(a, b *field.Error) bool { return a.Error() < b.Error() }),
+		cmpopts.EquateEmpty(),
+	}
 	for _, testCase := range append(successCases, errorCases...) {
 		name := testCase.name
 		var testTitle string
