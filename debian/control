@@ -3,7 +3,7 @@ Section: admin
 Priority: optional
 Maintainer: Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>
 Build-Depends: debhelper-compat (= 13),
-	       golang-go (>= 1.19),
+	       golang-go (>= 1.20),
 	       dh-golang,
 Standards-Version: 4.6.2
 Homepage: https://kubernetes.io
@@ -15,7 +15,6 @@ Package: kubernetes-client
 Architecture: amd64 i386 arm64
 Depends: ${shlibs:Depends},
 	 ${misc:Depends},
-	 golang-go (>= 1.19),
 Suggests: helm,
 	  k9s,
 	  kind,
@@ -30,13 +29,11 @@ Package: kubernetes-worker
 Architecture: amd64 i386 arm64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         golang-go (>= 1.19),
 Description: Production-Grade Container Scheduling and Management (worker binaries)
 
 Package: kubernetes-master
 Architecture: amd64 i386 arm64
 Depends: ${shlibs:Depends},
          ${misc:Depends},
-         golang-go (>= 1.19),
 	 etcd-server,
 Description: Production-Grade Container Scheduling and Management (master binaries)
