@@ -1,3 +1,9 @@
+kubernetes (1.28.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.28.3 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 30 Oct 2023 15:37:04 +0100
+
 kubernetes (1.27.4-2kaisen) kaisen-packages; urgency=medium
 
   * Remove golang-go as package dependancy

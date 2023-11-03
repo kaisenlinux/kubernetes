@@ -20,12 +20,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 
@@ -93,7 +95,7 @@ var httpProbe = &v1.Probe{
 // GCE Api requirements: nodes and master need storage r/w permissions.
 var _ = SIGDescribe("StatefulSet", func() {
 	f := framework.NewDefaultFramework("statefulset")
-	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelPrivileged
+	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 	var ns string
 	var c clientset.Interface
 
@@ -602,7 +604,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 			})
 			framework.ExpectNoError(err)
 
-			// Verify that statuful set will be scaled up in order.
+			// Verify that stateful set will be scaled up in order.
 			wg := sync.WaitGroup{}
 			var orderErr error
 			wg.Add(1)
@@ -656,7 +658,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 			})
 			framework.ExpectNoError(err)
 
-			// Verify that statuful set will be scaled down in order.
+			// Verify that stateful set will be scaled down in order.
 			wg.Add(1)
 			go func() {
 				defer ginkgo.GinkgoRecover()
@@ -1461,7 +1463,7 @@ var _ = SIGDescribe("StatefulSet", func() {
 		})
 	})
 
-	ginkgo.Describe("Scaling StatefulSetStartOrdinal [Feature:StatefulSetStartOrdinal]", func() {
+	ginkgo.Describe("Scaling StatefulSetStartOrdinal", func() {
 		ssName := "ss"
 		labels := map[string]string{
 			"foo": "bar",
@@ -1498,8 +1500,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			ginkgo.By("Confirming 2 replicas, with start ordinal 0")
 			pods := e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-0", "ss-1"})
+			err = expectPodNames(pods, []string{"ss-0", "ss-1"})
+			framework.ExpectNoError(err)
 
 			ginkgo.By("Setting .spec.replicas = 3 .spec.ordinals.start = 2")
 			ss, err = updateStatefulSetWithRetries(ctx, c, ns, ss.Name, func(update *appsv1.StatefulSet) {
@@ -1509,13 +1511,14 @@ var _ = SIGDescribe("StatefulSet", func() {
 				*(update.Spec.Replicas) = 3
 			})
 			framework.ExpectNoError(err)
+
+			// we need to ensure we wait for all the new ones to show up, not
+			// just for any random 3
+			waitForStatus(ctx, c, ss)
+			waitForPodNames(ctx, c, ss, []string{"ss-2", "ss-3", "ss-4"})
+			ginkgo.By("Confirming 3 replicas, with start ordinal 2")
 			e2estatefulset.WaitForStatusReplicas(ctx, c, ss, 3)
 			e2estatefulset.WaitForStatusReadyReplicas(ctx, c, ss, 3)
-
-			ginkgo.By("Confirming 3 replicas, with start ordinal 2")
-			pods = e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-2", "ss-3", "ss-4"})
 		})
 
 		ginkgo.It("Increasing .start.ordinal", func(ctx context.Context) {
@@ -1532,8 +1535,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			ginkgo.By("Confirming 2 replicas, with start ordinal 2")
 			pods := e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-2", "ss-3"})
+			err = expectPodNames(pods, []string{"ss-2", "ss-3"})
+			framework.ExpectNoError(err)
 
 			ginkgo.By("Increasing .spec.ordinals.start = 4")
 			ss, err = updateStatefulSetWithRetries(ctx, c, ns, ss.Name, func(update *appsv1.StatefulSet) {
@@ -1542,14 +1545,14 @@ var _ = SIGDescribe("StatefulSet", func() {
 				}
 			})
 			framework.ExpectNoError(err)
+
+			// since we are replacing 2 pods for 2, we need to ensure we wait
+			// for the new ones to show up, not just for any random 2
+			ginkgo.By("Confirming 2 replicas, with start ordinal 4")
 			waitForStatus(ctx, c, ss)
+			waitForPodNames(ctx, c, ss, []string{"ss-4", "ss-5"})
 			e2estatefulset.WaitForStatusReplicas(ctx, c, ss, 2)
 			e2estatefulset.WaitForStatusReadyReplicas(ctx, c, ss, 2)
-
-			ginkgo.By("Confirming 2 replicas, with start ordinal 4")
-			pods = e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-4", "ss-5"})
 		})
 
 		ginkgo.It("Decreasing .start.ordinal", func(ctx context.Context) {
@@ -1566,8 +1569,8 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			ginkgo.By("Confirming 2 replicas, with start ordinal 3")
 			pods := e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-3", "ss-4"})
+			err = expectPodNames(pods, []string{"ss-3", "ss-4"})
+			framework.ExpectNoError(err)
 
 			ginkgo.By("Decreasing .spec.ordinals.start = 2")
 			ss, err = updateStatefulSetWithRetries(ctx, c, ns, ss.Name, func(update *appsv1.StatefulSet) {
@@ -1576,14 +1579,14 @@ var _ = SIGDescribe("StatefulSet", func() {
 				}
 			})
 			framework.ExpectNoError(err)
+
+			// since we are replacing 2 pods for 2, we need to ensure we wait
+			// for the new ones to show up, not just for any random 2
+			ginkgo.By("Confirming 2 replicas, with start ordinal 2")
 			waitForStatus(ctx, c, ss)
+			waitForPodNames(ctx, c, ss, []string{"ss-2", "ss-3"})
 			e2estatefulset.WaitForStatusReplicas(ctx, c, ss, 2)
 			e2estatefulset.WaitForStatusReadyReplicas(ctx, c, ss, 2)
-
-			ginkgo.By("Confirming 2 replicas, with start ordinal 2")
-			pods = e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-2", "ss-3"})
 		})
 
 		ginkgo.It("Removing .start.ordinal", func(ctx context.Context) {
@@ -1599,21 +1602,22 @@ var _ = SIGDescribe("StatefulSet", func() {
 
 			ginkgo.By("Confirming 2 replicas, with start ordinal 3")
 			pods := e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-3", "ss-4"})
+			err = expectPodNames(pods, []string{"ss-3", "ss-4"})
+			framework.ExpectNoError(err)
 
 			ginkgo.By("Removing .spec.ordinals")
 			ss, err = updateStatefulSetWithRetries(ctx, c, ns, ss.Name, func(update *appsv1.StatefulSet) {
 				update.Spec.Ordinals = nil
 			})
 			framework.ExpectNoError(err)
+
+			// since we are replacing 2 pods for 2, we need to ensure we wait
+			// for the new ones to show up, not just for any random 2
+			framework.Logf("Confirming 2 replicas, with start ordinal 0")
+			waitForStatus(ctx, c, ss)
+			waitForPodNames(ctx, c, ss, []string{"ss-0", "ss-1"})
 			e2estatefulset.WaitForStatusReplicas(ctx, c, ss, 2)
 			e2estatefulset.WaitForStatusReadyReplicas(ctx, c, ss, 2)
-
-			ginkgo.By("Confirming 2 replicas, with start ordinal 0")
-			pods = e2estatefulset.GetPodList(ctx, c, ss)
-			e2estatefulset.SortStatefulPods(pods)
-			expectPodNames(pods, []string{"ss-0", "ss-1"})
 		})
 	})
 })
@@ -1942,7 +1946,7 @@ func rollbackTest(ctx context.Context, c clientset.Interface, ns string, ss *app
 }
 
 // confirmStatefulPodCount asserts that the current number of Pods in ss is count, waiting up to timeout for ss to
-// to scale to count.
+// scale to count.
 func confirmStatefulPodCount(ctx context.Context, c clientset.Interface, count int, ss *appsv1.StatefulSet, timeout time.Duration, hard bool) {
 	start := time.Now()
 	deadline := start.Add(timeout)
@@ -2037,7 +2041,7 @@ func getStatefulSetPodNameAtIndex(index int, ss *appsv1.StatefulSet) string {
 
 type updateStatefulSetFunc func(*appsv1.StatefulSet)
 
-// updateStatefulSetWithRetries updates statfulset template with retries.
+// updateStatefulSetWithRetries updates statefulset template with retries.
 func updateStatefulSetWithRetries(ctx context.Context, c clientset.Interface, namespace, name string, applyUpdate updateStatefulSetFunc) (statefulSet *appsv1.StatefulSet, err error) {
 	statefulSets := c.AppsV1().StatefulSets(namespace)
 	var updateErr error
@@ -2177,9 +2181,22 @@ func verifyStatefulSetPVCsExistWithOwnerRefs(ctx context.Context, c clientset.In
 	})
 }
 
-func expectPodNames(pods *v1.PodList, expectedPodNames []string) {
-	framework.ExpectEqual(len(pods.Items), len(expectedPodNames), "unexpected number of pods")
-	for i, pod := range pods.Items {
-		framework.ExpectEqual(pod.Name, expectedPodNames[i], "unexpected pod name")
+// expectPodNames compares the names of the pods from actualPods with expectedPodNames.
+// actualPods can be in any list, since we'll sort by their ordinals and filter
+// active ones. expectedPodNames should be ordered by statefulset ordinals.
+func expectPodNames(actualPods *v1.PodList, expectedPodNames []string) error {
+	e2estatefulset.SortStatefulPods(actualPods)
+	pods := []string{}
+	for _, pod := range actualPods.Items {
+		// ignore terminating pods, similarly to how the controller does it
+		// when calculating status information
+		if e2epod.IsPodActive(&pod) {
+			pods = append(pods, pod.Name)
+		}
 	}
+	if !reflect.DeepEqual(expectedPodNames, pods) {
+		diff := cmp.Diff(expectedPodNames, pods)
+		return fmt.Errorf("pod names don't match, diff (- for expected, + for actual):\n%s", diff)
+	}
+	return nil
 }
