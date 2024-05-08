@@ -119,13 +119,11 @@ type HorizontalController struct {
 	// Storage of HPAs and their selectors.
 	hpaSelectors    *selectors.BiMultimap
 	hpaSelectorsMux sync.Mutex
-
-	// feature gates
-	containerResourceMetricsEnabled bool
 }
 
 // NewHorizontalController creates a new HorizontalController.
 func NewHorizontalController(
+	ctx context.Context,
 	evtNamespacer v1core.EventsGetter,
 	scaleNamespacer scaleclient.ScalesGetter,
 	hpaNamespacer autoscalingclient.HorizontalPodAutoscalersGetter,
@@ -138,29 +136,27 @@ func NewHorizontalController(
 	tolerance float64,
 	cpuInitializationPeriod,
 	delayOfInitialReadinessStatus time.Duration,
-	containerResourceMetricsEnabled bool,
 ) *HorizontalController {
-	broadcaster := record.NewBroadcaster()
-	broadcaster.StartStructuredLogging(0)
+	broadcaster := record.NewBroadcaster(record.WithContext(ctx))
+	broadcaster.StartStructuredLogging(3)
 	broadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: evtNamespacer.Events("")})
 	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "horizontal-pod-autoscaler"})
 
 	hpaController := &HorizontalController{
-		eventRecorder:                   recorder,
-		scaleNamespacer:                 scaleNamespacer,
-		hpaNamespacer:                   hpaNamespacer,
-		downscaleStabilisationWindow:    downscaleStabilisationWindow,
-		monitor:                         monitor.New(),
-		queue:                           workqueue.NewNamedRateLimitingQueue(NewDefaultHPARateLimiter(resyncPeriod), "horizontalpodautoscaler"),
-		mapper:                          mapper,
-		recommendations:                 map[string][]timestampedRecommendation{},
-		recommendationsLock:             sync.Mutex{},
-		scaleUpEvents:                   map[string][]timestampedScaleEvent{},
-		scaleUpEventsLock:               sync.RWMutex{},
-		scaleDownEvents:                 map[string][]timestampedScaleEvent{},
-		scaleDownEventsLock:             sync.RWMutex{},
-		hpaSelectors:                    selectors.NewBiMultimap(),
-		containerResourceMetricsEnabled: containerResourceMetricsEnabled,
+		eventRecorder:                recorder,
+		scaleNamespacer:              scaleNamespacer,
+		hpaNamespacer:                hpaNamespacer,
+		downscaleStabilisationWindow: downscaleStabilisationWindow,
+		monitor:                      monitor.New(),
+		queue:                        workqueue.NewNamedRateLimitingQueue(NewDefaultHPARateLimiter(resyncPeriod), "horizontalpodautoscaler"),
+		mapper:                       mapper,
+		recommendations:              map[string][]timestampedRecommendation{},
+		recommendationsLock:          sync.Mutex{},
+		scaleUpEvents:                map[string][]timestampedScaleEvent{},
+		scaleUpEventsLock:            sync.RWMutex{},
+		scaleDownEvents:              map[string][]timestampedScaleEvent{},
+		scaleDownEventsLock:          sync.RWMutex{},
+		hpaSelectors:                 selectors.NewBiMultimap(),
 	}
 
 	hpaInformer.Informer().AddEventHandlerWithResyncPeriod(
@@ -475,12 +471,6 @@ func (a *HorizontalController) computeReplicasForMetric(ctx context.Context, hpa
 			return 0, "", time.Time{}, condition, fmt.Errorf("failed to get %s resource metric value: %v", spec.Resource.Name, err)
 		}
 	case autoscalingv2.ContainerResourceMetricSourceType:
-		if !a.containerResourceMetricsEnabled {
-			// If the container resource metrics feature is disabled but the object has the one,
-			// that means the user enabled the feature once,
-			// created some HPAs with the container resource metrics, and disabled it finally.
-			return 0, "", time.Time{}, condition, fmt.Errorf("ContainerResource metric type is not supported: disabled by the feature gate")
-		}
 		replicaCountProposal, timestampProposal, metricNameProposal, condition, err = a.computeStatusForContainerResourceMetric(ctx, specReplicas, spec, hpa, selector, status)
 		if err != nil {
 			return 0, "", time.Time{}, condition, fmt.Errorf("failed to get %s container metric value: %v", spec.ContainerResource.Container, err)
@@ -836,7 +826,7 @@ func (a *HorizontalController) reconcileAutoscaler(ctx context.Context, hpaShare
 		// computeReplicasForMetrics may return both non-zero metricDesiredReplicas and an error.
 		// That means some metrics still work and HPA should perform scaling based on them.
 		if err != nil && metricDesiredReplicas == -1 {
-			a.setCurrentReplicasInStatus(hpa, currentReplicas)
+			a.setCurrentReplicasAndMetricsInStatus(hpa, currentReplicas, metricStatuses)
 			if err := a.updateStatusIfNeeded(ctx, hpaStatusOriginal, hpa); err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -879,7 +869,7 @@ func (a *HorizontalController) reconcileAutoscaler(ctx context.Context, hpaShare
 		if err != nil {
 			a.eventRecorder.Eventf(hpa, v1.EventTypeWarning, "FailedRescale", "New size: %d; reason: %s; error: %v", desiredReplicas, rescaleReason, err.Error())
 			setCondition(hpa, autoscalingv2.AbleToScale, v1.ConditionFalse, "FailedUpdateScale", "the HPA controller was unable to update the target scale: %v", err)
-			a.setCurrentReplicasInStatus(hpa, currentReplicas)
+			a.setCurrentReplicasAndMetricsInStatus(hpa, currentReplicas, metricStatuses)
 			if err := a.updateStatusIfNeeded(ctx, hpaStatusOriginal, hpa); err != nil {
 				utilruntime.HandleError(err)
 			}
@@ -1357,9 +1347,9 @@ func (a *HorizontalController) scaleForResourceMappings(ctx context.Context, nam
 	return nil, schema.GroupResource{}, firstErr
 }
 
-// setCurrentReplicasInStatus sets the current replica count in the status of the HPA.
-func (a *HorizontalController) setCurrentReplicasInStatus(hpa *autoscalingv2.HorizontalPodAutoscaler, currentReplicas int32) {
-	a.setStatus(hpa, currentReplicas, hpa.Status.DesiredReplicas, hpa.Status.CurrentMetrics, false)
+// setCurrentReplicasAndMetricsInStatus sets the current replica count and metrics in the status of the HPA.
+func (a *HorizontalController) setCurrentReplicasAndMetricsInStatus(hpa *autoscalingv2.HorizontalPodAutoscaler, currentReplicas int32, metricStatuses []autoscalingv2.MetricStatus) {
+	a.setStatus(hpa, currentReplicas, hpa.Status.DesiredReplicas, metricStatuses, false)
 }
 
 // setStatus recreates the status of the given HPA, updating the current and

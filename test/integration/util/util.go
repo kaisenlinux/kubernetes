@@ -21,17 +21,21 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
 	policy "k8s.io/api/policy/v1"
+	resourcev1alpha2 "k8s.io/api/resource/v1alpha2"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/uuid"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/apiserver/pkg/admission"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cacheddiscovery "k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/dynamic/dynamicinformer"
@@ -45,10 +49,11 @@ import (
 	"k8s.io/client-go/scale"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/events"
+	cliflag "k8s.io/component-base/cli/flag"
 	pvutil "k8s.io/component-helpers/storage/volume"
 	"k8s.io/controller-manager/pkg/informerfactory"
 	"k8s.io/klog/v2"
-	"k8s.io/kube-scheduler/config/v1beta3"
+	kubeschedulerconfigv1 "k8s.io/kube-scheduler/config/v1"
 	"k8s.io/kubernetes/cmd/kube-apiserver/app/options"
 	podutil "k8s.io/kubernetes/pkg/api/v1/pod"
 	"k8s.io/kubernetes/pkg/controller/disruption"
@@ -56,18 +61,20 @@ import (
 	"k8s.io/kubernetes/pkg/controller/namespace"
 	"k8s.io/kubernetes/pkg/controller/resourceclaim"
 	"k8s.io/kubernetes/pkg/controlplane"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/scheduler"
 	kubeschedulerconfig "k8s.io/kubernetes/pkg/scheduler/apis/config"
 	configtesting "k8s.io/kubernetes/pkg/scheduler/apis/config/testing"
 	schedulerframework "k8s.io/kubernetes/pkg/scheduler/framework"
 	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/defaultpreemption"
+	frameworkruntime "k8s.io/kubernetes/pkg/scheduler/framework/runtime"
 	"k8s.io/kubernetes/pkg/scheduler/profile"
 	st "k8s.io/kubernetes/pkg/scheduler/testing"
 	taintutils "k8s.io/kubernetes/pkg/util/taints"
 	"k8s.io/kubernetes/test/integration/framework"
 	imageutils "k8s.io/kubernetes/test/utils/image"
 	"k8s.io/kubernetes/test/utils/ktesting"
-	"k8s.io/utils/pointer"
+	"k8s.io/utils/ptr"
 )
 
 // ShutdownFunc represents the function handle to be called, typically in a defer handler, to shutdown a running module
@@ -76,7 +83,7 @@ type ShutdownFunc func()
 // StartScheduler configures and starts a scheduler given a handle to the clientSet interface
 // and event broadcaster. It returns the running scheduler and podInformer. Background goroutines
 // will keep running until the context is canceled.
-func StartScheduler(ctx context.Context, clientSet clientset.Interface, kubeConfig *restclient.Config, cfg *kubeschedulerconfig.KubeSchedulerConfiguration) (*scheduler.Scheduler, informers.SharedInformerFactory) {
+func StartScheduler(ctx context.Context, clientSet clientset.Interface, kubeConfig *restclient.Config, cfg *kubeschedulerconfig.KubeSchedulerConfiguration, outOfTreePluginRegistry frameworkruntime.Registry) (*scheduler.Scheduler, informers.SharedInformerFactory) {
 	informerFactory := scheduler.NewInformerFactory(clientSet, 0)
 	evtBroadcaster := events.NewBroadcaster(&events.EventSinkImpl{
 		Interface: clientSet.EventsV1()})
@@ -101,7 +108,9 @@ func StartScheduler(ctx context.Context, clientSet clientset.Interface, kubeConf
 		scheduler.WithPodMaxBackoffSeconds(cfg.PodMaxBackoffSeconds),
 		scheduler.WithPodInitialBackoffSeconds(cfg.PodInitialBackoffSeconds),
 		scheduler.WithExtenders(cfg.Extenders...),
-		scheduler.WithParallelism(cfg.Parallelism))
+		scheduler.WithParallelism(cfg.Parallelism),
+		scheduler.WithFrameworkOutOfTreeRegistry(outOfTreePluginRegistry),
+	)
 	if err != nil {
 		logger.Error(err, "Error creating scheduler")
 		klog.FlushAndExit(klog.ExitFlushTimeout, 1)
@@ -119,7 +128,7 @@ func StartScheduler(ctx context.Context, clientSet clientset.Interface, kubeConf
 	return sched, informerFactory
 }
 
-func CreateResourceClaimController(ctx context.Context, tb testing.TB, clientSet clientset.Interface, informerFactory informers.SharedInformerFactory) func() {
+func CreateResourceClaimController(ctx context.Context, tb ktesting.TB, clientSet clientset.Interface, informerFactory informers.SharedInformerFactory) func() {
 	podInformer := informerFactory.Core().V1().Pods()
 	schedulingInformer := informerFactory.Resource().V1alpha2().PodSchedulingContexts()
 	claimInformer := informerFactory.Resource().V1alpha2().ResourceClaims()
@@ -181,7 +190,7 @@ func StartFakePVController(ctx context.Context, clientSet clientset.Interface, i
 // CreateGCController creates a garbage controller and returns a run function
 // for it. The informer factory needs to be started before invoking that
 // function.
-func CreateGCController(ctx context.Context, tb testing.TB, restConfig restclient.Config, informerSet informers.SharedInformerFactory) func() {
+func CreateGCController(ctx context.Context, tb ktesting.TB, restConfig restclient.Config, informerSet informers.SharedInformerFactory) func() {
 	restclient.AddUserAgent(&restConfig, "gc-controller")
 	clientSet := clientset.NewForConfigOrDie(&restConfig)
 	metadataClient, err := metadata.NewForConfig(&restConfig)
@@ -194,6 +203,7 @@ func CreateGCController(ctx context.Context, tb testing.TB, restConfig restclien
 	alwaysStarted := make(chan struct{})
 	close(alwaysStarted)
 	gc, err := garbagecollector.NewGarbageCollector(
+		ctx,
 		clientSet,
 		metadataClient,
 		restMapper,
@@ -218,7 +228,7 @@ func CreateGCController(ctx context.Context, tb testing.TB, restConfig restclien
 // CreateNamespaceController creates a namespace controller and returns a run
 // function for it. The informer factory needs to be started before invoking
 // that function.
-func CreateNamespaceController(ctx context.Context, tb testing.TB, restConfig restclient.Config, informerSet informers.SharedInformerFactory) func() {
+func CreateNamespaceController(ctx context.Context, tb ktesting.TB, restConfig restclient.Config, informerSet informers.SharedInformerFactory) func() {
 	restclient.AddUserAgent(&restConfig, "namespace-controller")
 	clientSet := clientset.NewForConfigOrDie(&restConfig)
 	metadataClient, err := metadata.NewForConfig(&restConfig)
@@ -239,8 +249,15 @@ func CreateNamespaceController(ctx context.Context, tb testing.TB, restConfig re
 	}
 }
 
-// TestContext store necessary context info
+// TestContext store necessary context info.
+// It also contains some optional parameters for InitTestScheduler.
 type TestContext struct {
+	// DisableEventSink, if set to true before calling InitTestScheduler,
+	// will skip the eventBroadcaster.StartRecordingToSink and thus
+	// some extra goroutines which are tricky to get rid of after
+	// a test.
+	DisableEventSink bool
+
 	NS                 *v1.Namespace
 	ClientSet          clientset.Interface
 	KubeConfig         *restclient.Config
@@ -257,7 +274,28 @@ type TestContext struct {
 	// SchedulerCloseFn will tear down the resources in creating scheduler,
 	// including the scheduler itself.
 	SchedulerCloseFn framework.TearDownFunc
+
+	// RoundTrip, if set, will be called for every HTTP request going to the apiserver.
+	// It can be used for error injection.
+	RoundTrip atomic.Pointer[RoundTripWrapper]
 }
+
+type RoundTripWrapper func(http.RoundTripper, *http.Request) (*http.Response, error)
+
+type roundTripWrapper struct {
+	tc        *TestContext
+	transport http.RoundTripper
+}
+
+func (r roundTripWrapper) RoundTrip(req *http.Request) (*http.Response, error) {
+	wrapper := r.tc.RoundTrip.Load()
+	if wrapper != nil {
+		return (*wrapper)(r.transport, req)
+	}
+	return r.transport.RoundTrip(req)
+}
+
+var _ http.RoundTripper = roundTripWrapper{}
 
 // CleanupNodes cleans all nodes which were created during integration test
 func CleanupNodes(cs clientset.Interface, t *testing.T) {
@@ -466,13 +504,17 @@ func UpdateNodeStatus(cs clientset.Interface, node *v1.Node) error {
 // It registers cleanup functions to t.Cleanup(), they will be called when the test completes,
 // no need to do this again.
 func InitTestAPIServer(t *testing.T, nsPrefix string, admission admission.Interface) *TestContext {
-	_, ctx := ktesting.NewTestContext(t)
-	ctx, cancel := context.WithCancel(ctx)
-	testCtx := TestContext{Ctx: ctx}
+	tCtx := ktesting.Init(t)
+	testCtx := &TestContext{Ctx: tCtx}
 
-	testCtx.ClientSet, testCtx.KubeConfig, testCtx.CloseFn = framework.StartTestServer(ctx, t, framework.TestServerSetup{
+	testCtx.ClientSet, testCtx.KubeConfig, testCtx.CloseFn = framework.StartTestServer(tCtx, t, framework.TestServerSetup{
 		ModifyServerRunOptions: func(options *options.ServerRunOptions) {
 			options.Admission.GenericAdmission.DisablePlugins = []string{"ServiceAccount", "TaintNodesByCondition", "Priority", "StorageObjectInUseProtection"}
+			if utilfeature.DefaultFeatureGate.Enabled(features.DynamicResourceAllocation) {
+				options.APIEnablement.RuntimeConfig = cliflag.ConfigurationMap{
+					resourcev1alpha2.SchemeGroupVersion.String(): "true",
+				}
+			}
 		},
 		ModifyServerConfig: func(config *controlplane.Config) {
 			if admission != nil {
@@ -481,9 +523,19 @@ func InitTestAPIServer(t *testing.T, nsPrefix string, admission admission.Interf
 		},
 	})
 
+	// Support wrapping HTTP requests.
+	testCtx.KubeConfig.Wrap(func(transport http.RoundTripper) http.RoundTripper {
+		return roundTripWrapper{tc: testCtx, transport: transport}
+	})
+	var err error
+	testCtx.ClientSet, err = clientset.NewForConfig(testCtx.KubeConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	oldCloseFn := testCtx.CloseFn
 	testCtx.CloseFn = func() {
-		cancel()
+		tCtx.Cancel("tearing down apiserver")
 		oldCloseFn()
 	}
 
@@ -494,10 +546,10 @@ func InitTestAPIServer(t *testing.T, nsPrefix string, admission admission.Interf
 	}
 
 	t.Cleanup(func() {
-		CleanupTest(t, &testCtx)
+		CleanupTest(t, testCtx)
 	})
 
-	return &testCtx
+	return testCtx
 }
 
 // WaitForSchedulerCacheCleanup waits for cleanup of scheduler's cache to complete
@@ -560,7 +612,9 @@ func InitTestSchedulerWithOptions(
 		t.Fatalf("Couldn't create scheduler: %v", err)
 	}
 
-	eventBroadcaster.StartRecordingToSink(ctx.Done())
+	if !testCtx.DisableEventSink {
+		eventBroadcaster.StartRecordingToSink(ctx.Done())
+	}
 
 	oldCloseFn := testCtx.CloseFn
 	testCtx.CloseFn = func() {
@@ -579,7 +633,7 @@ func InitTestSchedulerWithOptions(
 // WaitForPodToScheduleWithTimeout waits for a pod to get scheduled and returns
 // an error if it does not scheduled within the given timeout.
 func WaitForPodToScheduleWithTimeout(cs clientset.Interface, pod *v1.Pod, timeout time.Duration) error {
-	return wait.Poll(100*time.Millisecond, timeout, PodScheduled(cs, pod.Namespace, pod.Name))
+	return wait.PollUntilContextTimeout(context.TODO(), 100*time.Millisecond, timeout, false, PodScheduled(cs, pod.Namespace, pod.Name))
 }
 
 // WaitForPodToSchedule waits for a pod to get scheduled and returns an error if
@@ -589,9 +643,9 @@ func WaitForPodToSchedule(cs clientset.Interface, pod *v1.Pod) error {
 }
 
 // PodScheduled checks if the pod has been scheduled
-func PodScheduled(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
-	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+func PodScheduled(c clientset.Interface, podNamespace, podName string) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil
@@ -606,7 +660,6 @@ func PodScheduled(c clientset.Interface, podNamespace, podName string) wait.Cond
 // InitDisruptionController initializes and runs a Disruption Controller to properly
 // update PodDisuptionBudget objects.
 func InitDisruptionController(t *testing.T, testCtx *TestContext) *disruption.DisruptionController {
-	_, ctx := ktesting.NewTestContext(t)
 	informers := informers.NewSharedInformerFactory(testCtx.ClientSet, 12*time.Hour)
 
 	discoveryClient := cacheddiscovery.NewMemCacheClient(testCtx.ClientSet.Discovery())
@@ -620,7 +673,7 @@ func InitDisruptionController(t *testing.T, testCtx *TestContext) *disruption.Di
 	}
 
 	dc := disruption.NewDisruptionController(
-		ctx,
+		testCtx.Ctx,
 		informers.Core().V1().Pods(),
 		informers.Policy().V1().PodDisruptionBudgets(),
 		informers.Core().V1().ReplicationControllers(),
@@ -650,12 +703,12 @@ func InitTestSchedulerWithNS(t *testing.T, nsPrefix string, opts ...scheduler.Op
 // InitTestDisablePreemption initializes a test environment and creates API server and scheduler with default
 // configuration but with pod preemption disabled.
 func InitTestDisablePreemption(t *testing.T, nsPrefix string) *TestContext {
-	cfg := configtesting.V1beta3ToInternalWithDefaults(t, v1beta3.KubeSchedulerConfiguration{
-		Profiles: []v1beta3.KubeSchedulerProfile{{
-			SchedulerName: pointer.String(v1.DefaultSchedulerName),
-			Plugins: &v1beta3.Plugins{
-				PostFilter: v1beta3.PluginSet{
-					Disabled: []v1beta3.Plugin{
+	cfg := configtesting.V1ToInternalWithDefaults(t, kubeschedulerconfigv1.KubeSchedulerConfiguration{
+		Profiles: []kubeschedulerconfigv1.KubeSchedulerProfile{{
+			SchedulerName: ptr.To(v1.DefaultSchedulerName),
+			Plugins: &kubeschedulerconfigv1.Plugins{
+				PostFilter: kubeschedulerconfigv1.PluginSet{
+					Disabled: []kubeschedulerconfigv1.Plugin{
 						{Name: defaultpreemption.Name},
 					},
 				},
@@ -713,7 +766,7 @@ func createNodes(cs clientset.Interface, prefix string, wrapper *st.NodeWrapper,
 	nodes := make([]*v1.Node, numNodes)
 	for i := 0; i < numNodes; i++ {
 		nodeName := fmt.Sprintf("%v-%d", prefix, i)
-		node, err := CreateNode(cs, wrapper.Name(nodeName).Obj())
+		node, err := CreateNode(cs, wrapper.Name(nodeName).Label("kubernetes.io/hostname", nodeName).Obj())
 		if err != nil {
 			return nodes[:], err
 		}
@@ -899,9 +952,9 @@ func RunPodWithContainers(cs clientset.Interface, pod *v1.Pod) (*v1.Pod, error) 
 }
 
 // PodIsGettingEvicted returns true if the pod's deletion timestamp is set.
-func PodIsGettingEvicted(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
-	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+func PodIsGettingEvicted(c clientset.Interface, podNamespace, podName string) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			return false, err
 		}
@@ -913,9 +966,9 @@ func PodIsGettingEvicted(c clientset.Interface, podNamespace, podName string) wa
 }
 
 // PodScheduledIn returns true if a given pod is placed onto one of the expected nodes.
-func PodScheduledIn(c clientset.Interface, podNamespace, podName string, nodeNames []string) wait.ConditionFunc {
-	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+func PodScheduledIn(c clientset.Interface, podNamespace, podName string, nodeNames []string) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil
@@ -934,9 +987,9 @@ func PodScheduledIn(c clientset.Interface, podNamespace, podName string, nodeNam
 
 // PodUnschedulable returns a condition function that returns true if the given pod
 // gets unschedulable status of reason 'Unschedulable'.
-func PodUnschedulable(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
-	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+func PodUnschedulable(c clientset.Interface, podNamespace, podName string) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil
@@ -950,9 +1003,9 @@ func PodUnschedulable(c clientset.Interface, podNamespace, podName string) wait.
 // PodSchedulingError returns a condition function that returns true if the given pod
 // gets unschedulable status for reasons other than "Unschedulable". The scheduler
 // records such reasons in case of error.
-func PodSchedulingError(c clientset.Interface, podNamespace, podName string) wait.ConditionFunc {
-	return func() (bool, error) {
-		pod, err := c.CoreV1().Pods(podNamespace).Get(context.TODO(), podName, metav1.GetOptions{})
+func PodSchedulingError(c clientset.Interface, podNamespace, podName string) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		pod, err := c.CoreV1().Pods(podNamespace).Get(ctx, podName, metav1.GetOptions{})
 		if err != nil {
 			// This could be a connection error so we want to retry.
 			return false, nil
@@ -981,7 +1034,7 @@ func PodSchedulingGated(c clientset.Interface, podNamespace, podName string) wai
 // WaitForPodUnschedulableWithTimeout waits for a pod to fail scheduling and returns
 // an error if it does not become unschedulable within the given timeout.
 func WaitForPodUnschedulableWithTimeout(cs clientset.Interface, pod *v1.Pod, timeout time.Duration) error {
-	return wait.Poll(100*time.Millisecond, timeout, PodUnschedulable(cs, pod.Namespace, pod.Name))
+	return wait.PollUntilContextTimeout(context.TODO(), 100*time.Millisecond, timeout, false, PodUnschedulable(cs, pod.Namespace, pod.Name))
 }
 
 // WaitForPodUnschedulable waits for a pod to fail scheduling and returns
@@ -1094,10 +1147,11 @@ func NextPodOrDie(t *testing.T, testCtx *TestContext) *schedulerframework.Queued
 	t.Helper()
 
 	var podInfo *schedulerframework.QueuedPodInfo
+	logger := klog.FromContext(testCtx.Ctx)
 	// NextPod() is a blocking operation. Wrap it in timeout() to avoid relying on
 	// default go testing timeout (10m) to abort.
 	if err := timeout(testCtx.Ctx, time.Second*5, func() {
-		podInfo, _ = testCtx.Scheduler.NextPod()
+		podInfo, _ = testCtx.Scheduler.NextPod(logger)
 	}); err != nil {
 		t.Fatalf("Timed out waiting for the Pod to be popped: %v", err)
 	}
@@ -1105,14 +1159,17 @@ func NextPodOrDie(t *testing.T, testCtx *TestContext) *schedulerframework.Queued
 }
 
 // NextPod returns the next Pod in the scheduler queue, with a 5 seconds timeout.
+// Note that this function leaks goroutines in the case of timeout; even after this function returns after timeout,
+// the goroutine made by this function keep waiting to pop a pod from the queue.
 func NextPod(t *testing.T, testCtx *TestContext) *schedulerframework.QueuedPodInfo {
 	t.Helper()
 
 	var podInfo *schedulerframework.QueuedPodInfo
+	logger := klog.FromContext(testCtx.Ctx)
 	// NextPod() is a blocking operation. Wrap it in timeout() to avoid relying on
 	// default go testing timeout (10m) to abort.
 	if err := timeout(testCtx.Ctx, time.Second*5, func() {
-		podInfo, _ = testCtx.Scheduler.NextPod()
+		podInfo, _ = testCtx.Scheduler.NextPod(logger)
 	}); err != nil {
 		return nil
 	}

@@ -57,19 +57,18 @@ const (
 	CertificateBlockType = "CERTIFICATE"
 	// RSAPrivateKeyBlockType is a possible value for pem.Block.Type.
 	RSAPrivateKeyBlockType = "RSA PRIVATE KEY"
-	rsaKeySize             = 2048
 )
 
-// CertConfig is a wrapper around certutil.Config extending it with PublicKeyAlgorithm.
+// CertConfig is a wrapper around certutil.Config extending it with EncryptionAlgorithm.
 type CertConfig struct {
 	certutil.Config
-	NotAfter           *time.Time
-	PublicKeyAlgorithm x509.PublicKeyAlgorithm
+	NotAfter            *time.Time
+	EncryptionAlgorithm kubeadmapi.EncryptionAlgorithmType
 }
 
 // NewCertificateAuthority creates new certificate and private key for the certificate authority
 func NewCertificateAuthority(config *CertConfig) (*x509.Certificate, crypto.Signer, error) {
-	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
+	key, err := NewPrivateKey(config.EncryptionAlgorithm)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create private key while generating CA certificate")
 	}
@@ -86,7 +85,7 @@ func NewCertificateAuthority(config *CertConfig) (*x509.Certificate, crypto.Sign
 
 // NewIntermediateCertificateAuthority creates new certificate and private key for an intermediate certificate authority
 func NewIntermediateCertificateAuthority(parentCert *x509.Certificate, parentKey crypto.Signer, config *CertConfig) (*x509.Certificate, crypto.Signer, error) {
-	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
+	key, err := NewPrivateKey(config.EncryptionAlgorithm)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create private key while generating intermediate CA certificate")
 	}
@@ -105,7 +104,7 @@ func NewCertAndKey(caCert *x509.Certificate, caKey crypto.Signer, config *CertCo
 		return nil, nil, errors.New("must specify at least one ExtKeyUsage")
 	}
 
-	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
+	key, err := NewPrivateKey(config.EncryptionAlgorithm)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create private key")
 	}
@@ -120,7 +119,7 @@ func NewCertAndKey(caCert *x509.Certificate, caKey crypto.Signer, config *CertCo
 
 // NewCSRAndKey generates a new key and CSR and that could be signed to create the given certificate
 func NewCSRAndKey(config *CertConfig) (*x509.CertificateRequest, crypto.Signer, error) {
-	key, err := NewPrivateKey(config.PublicKeyAlgorithm)
+	key, err := NewPrivateKey(config.EncryptionAlgorithm)
 	if err != nil {
 		return nil, nil, errors.Wrap(err, "unable to create private key")
 	}
@@ -332,21 +331,6 @@ func TryLoadKeyFromDisk(pkiPath, name string) (crypto.Signer, error) {
 	}
 
 	return key, nil
-}
-
-// TryLoadCSRAndKeyFromDisk tries to load the CSR and key from the disk
-func TryLoadCSRAndKeyFromDisk(pkiPath, name string) (*x509.CertificateRequest, crypto.Signer, error) {
-	csr, err := TryLoadCSRFromDisk(pkiPath, name)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "could not load CSR file")
-	}
-
-	key, err := TryLoadKeyFromDisk(pkiPath, name)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, "could not load key file")
-	}
-
-	return csr, key, nil
 }
 
 // TryLoadPrivatePublicKeyFromDisk tries to load the key from the disk and validates that it is valid
@@ -623,11 +607,32 @@ func EncodePublicKeyPEM(key crypto.PublicKey) ([]byte, error) {
 // NewPrivateKey returns a new private key.
 var NewPrivateKey = GeneratePrivateKey
 
-func GeneratePrivateKey(keyType x509.PublicKeyAlgorithm) (crypto.Signer, error) {
-	if keyType == x509.ECDSA {
+// rsaKeySizeFromAlgorithmType takes a known RSA algorithm defined in the kubeadm API
+// an returns its key size. For unknown types it returns 0. For an empty type it returns
+// the default size of 2048.
+func rsaKeySizeFromAlgorithmType(keyType kubeadmapi.EncryptionAlgorithmType) int {
+	switch keyType {
+	case kubeadmapi.EncryptionAlgorithmRSA2048, "":
+		return 2048
+	case kubeadmapi.EncryptionAlgorithmRSA3072:
+		return 3072
+	case kubeadmapi.EncryptionAlgorithmRSA4096:
+		return 4096
+	default:
+		return 0
+	}
+}
+
+// GeneratePrivateKey is the default function for generating private keys.
+func GeneratePrivateKey(keyType kubeadmapi.EncryptionAlgorithmType) (crypto.Signer, error) {
+	if keyType == kubeadmapi.EncryptionAlgorithmECDSAP256 {
 		return ecdsa.GenerateKey(elliptic.P256(), cryptorand.Reader)
 	}
 
+	rsaKeySize := rsaKeySizeFromAlgorithmType(keyType)
+	if rsaKeySize == 0 {
+		return nil, errors.Errorf("cannot obtain key size from unknown RSA algorithm: %q", keyType)
+	}
 	return rsa.GenerateKey(cryptorand.Reader, rsaKeySize)
 }
 

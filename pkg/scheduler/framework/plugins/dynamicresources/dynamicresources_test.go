@@ -192,9 +192,14 @@ type want struct {
 	prescore         result
 	reserve          result
 	unreserve        result
+	prebind          result
 	postbind         result
 	postFilterResult *framework.PostFilterResult
 	postfilter       result
+
+	// unreserveAfterBindFailure, if set, triggers a call to Unreserve
+	// after PreBind, as if the actual Bind had failed.
+	unreserveAfterBindFailure *result
 }
 
 // prepare contains changes for objects in the API server.
@@ -206,6 +211,7 @@ type prepare struct {
 	prescore   change
 	reserve    change
 	unreserve  change
+	prebind    change
 	postbind   change
 	postfilter change
 }
@@ -237,7 +243,7 @@ func TestPlugin(t *testing.T) {
 			pod:    podWithClaimName,
 			claims: []*resourcev1alpha2.ResourceClaim{allocatedClaim, otherClaim},
 			want: want{
-				reserve: result{
+				prebind: result{
 					changes: change{
 						claim: func(claim *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
 							if claim.Name == claimName {
@@ -254,7 +260,7 @@ func TestPlugin(t *testing.T) {
 			pod:    podWithClaimTemplateInStatus,
 			claims: []*resourcev1alpha2.ResourceClaim{allocatedClaim, otherClaim},
 			want: want{
-				reserve: result{
+				prebind: result{
 					changes: change{
 						claim: func(claim *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
 							if claim.Name == claimName {
@@ -303,8 +309,9 @@ func TestPlugin(t *testing.T) {
 			},
 		},
 		"waiting-for-immediate-allocation": {
-			pod:    podWithClaimName,
-			claims: []*resourcev1alpha2.ResourceClaim{pendingImmediateClaim},
+			pod:     podWithClaimName,
+			claims:  []*resourcev1alpha2.ResourceClaim{pendingImmediateClaim},
+			classes: []*resourcev1alpha2.ResourceClass{resourceClass},
 			want: want{
 				prefilter: result{
 					status: framework.NewStatus(framework.UnschedulableAndUnresolvable, `unallocated immediate resourceclaim`),
@@ -330,13 +337,11 @@ func TestPlugin(t *testing.T) {
 			pod:    podWithClaimName,
 			claims: []*resourcev1alpha2.ResourceClaim{pendingDelayedClaim},
 			want: want{
-				filter: perNodeResult{
-					workerNode.Name: {
-						status: framework.AsStatus(fmt.Errorf(`look up resource class: resourceclass.resource.k8s.io "%s" not found`, className)),
-					},
+				prefilter: result{
+					status: framework.NewStatus(framework.UnschedulableAndUnresolvable, fmt.Sprintf("resource class %s does not exist", className)),
 				},
 				postfilter: result{
-					status: framework.NewStatus(framework.Unschedulable, `still not schedulable`),
+					status: framework.NewStatus(framework.Unschedulable, `no new claims to deallocate`),
 				},
 			},
 		},
@@ -347,8 +352,8 @@ func TestPlugin(t *testing.T) {
 			claims:  []*resourcev1alpha2.ResourceClaim{pendingDelayedClaim},
 			classes: []*resourcev1alpha2.ResourceClass{resourceClass},
 			want: want{
-				reserve: result{
-					status: framework.NewStatus(framework.UnschedulableAndUnresolvable, `waiting for resource driver to allocate resource`),
+				prebind: result{
+					status: framework.NewStatus(framework.Pending, `waiting for resource driver`),
 					added:  []metav1.Object{schedulingSelectedPotential},
 				},
 			},
@@ -361,8 +366,8 @@ func TestPlugin(t *testing.T) {
 			claims:  []*resourcev1alpha2.ResourceClaim{pendingDelayedClaim, pendingDelayedClaim2},
 			classes: []*resourcev1alpha2.ResourceClass{resourceClass},
 			want: want{
-				reserve: result{
-					status: framework.NewStatus(framework.UnschedulableAndUnresolvable, `waiting for resource driver to provide information`),
+				prebind: result{
+					status: framework.NewStatus(framework.Pending, `waiting for resource driver`),
 					added:  []metav1.Object{schedulingPotential},
 				},
 			},
@@ -375,8 +380,8 @@ func TestPlugin(t *testing.T) {
 			schedulings: []*resourcev1alpha2.PodSchedulingContext{schedulingInfo},
 			classes:     []*resourcev1alpha2.ResourceClass{resourceClass},
 			want: want{
-				reserve: result{
-					status: framework.NewStatus(framework.UnschedulableAndUnresolvable, `waiting for resource driver to allocate resource`),
+				prebind: result{
+					status: framework.NewStatus(framework.Pending, `waiting for resource driver`),
 					changes: change{
 						scheduling: func(in *resourcev1alpha2.PodSchedulingContext) *resourcev1alpha2.PodSchedulingContext {
 							return st.FromPodSchedulingContexts(in).
@@ -395,7 +400,7 @@ func TestPlugin(t *testing.T) {
 			schedulings: []*resourcev1alpha2.PodSchedulingContext{schedulingInfo},
 			classes:     []*resourcev1alpha2.ResourceClass{resourceClass},
 			prepare: prepare{
-				reserve: change{
+				prebind: change{
 					scheduling: func(in *resourcev1alpha2.PodSchedulingContext) *resourcev1alpha2.PodSchedulingContext {
 						// This does not actually conflict with setting the
 						// selected node, but because the plugin is not using
@@ -407,7 +412,7 @@ func TestPlugin(t *testing.T) {
 				},
 			},
 			want: want{
-				reserve: result{
+				prebind: result{
 					status: framework.AsStatus(errors.New(`ResourceVersion must match the object that gets updated`)),
 				},
 			},
@@ -419,7 +424,7 @@ func TestPlugin(t *testing.T) {
 			schedulings: []*resourcev1alpha2.PodSchedulingContext{schedulingInfo},
 			classes:     []*resourcev1alpha2.ResourceClass{resourceClass},
 			want: want{
-				reserve: result{
+				prebind: result{
 					changes: change{
 						claim: func(in *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
 							return st.FromResourceClaim(in).
@@ -469,6 +474,7 @@ func TestPlugin(t *testing.T) {
 								Obj()
 						},
 					},
+					status: framework.NewStatus(framework.Unschedulable, `deallocation of ResourceClaim completed`),
 				},
 			},
 		},
@@ -494,12 +500,36 @@ func TestPlugin(t *testing.T) {
 			pod:    podWithClaimName,
 			claims: []*resourcev1alpha2.ResourceClaim{allocatedClaimWithGoodTopology},
 			want: want{
-				reserve: result{
+				prebind: result{
 					changes: change{
 						claim: func(in *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
 							return st.FromResourceClaim(in).
 								ReservedFor(resourcev1alpha2.ResourceClaimConsumerReference{Resource: "pods", Name: podName, UID: types.UID(podUID)}).
 								Obj()
+						},
+					},
+				},
+			},
+		},
+		"bind-failure": {
+			pod:    podWithClaimName,
+			claims: []*resourcev1alpha2.ResourceClaim{allocatedClaimWithGoodTopology},
+			want: want{
+				prebind: result{
+					changes: change{
+						claim: func(in *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
+							return st.FromResourceClaim(in).
+								ReservedFor(resourcev1alpha2.ResourceClaimConsumerReference{Resource: "pods", Name: podName, UID: types.UID(podUID)}).
+								Obj()
+						},
+					},
+				},
+				unreserveAfterBindFailure: &result{
+					changes: change{
+						claim: func(in *resourcev1alpha2.ResourceClaim) *resourcev1alpha2.ResourceClaim {
+							out := in.DeepCopy()
+							out.Status.ReservedFor = []resourcev1alpha2.ResourceClaimConsumerReference{}
+							return out
 						},
 					},
 				},
@@ -552,7 +582,7 @@ func TestPlugin(t *testing.T) {
 			}
 			unschedulable := status.Code() != framework.Success
 
-			var potentialNodes []*v1.Node
+			var potentialNodes []*framework.NodeInfo
 
 			initialObjects = testCtx.listAll(t)
 			testCtx.updateAPIServer(t, initialObjects, tc.prepare.filter)
@@ -567,7 +597,7 @@ func TestPlugin(t *testing.T) {
 					if status.Code() != framework.Success {
 						unschedulable = true
 					} else {
-						potentialNodes = append(potentialNodes, nodeInfo.Node())
+						potentialNodes = append(potentialNodes, nodeInfo)
 					}
 				}
 			}
@@ -584,13 +614,13 @@ func TestPlugin(t *testing.T) {
 				}
 			}
 
-			var selectedNode *v1.Node
+			var selectedNode *framework.NodeInfo
 			if !unschedulable && len(potentialNodes) > 0 {
 				selectedNode = potentialNodes[0]
 
 				initialObjects = testCtx.listAll(t)
 				initialObjects = testCtx.updateAPIServer(t, initialObjects, tc.prepare.reserve)
-				status := testCtx.p.Reserve(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Name)
+				status := testCtx.p.Reserve(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Node().Name)
 				t.Run("reserve", func(t *testing.T) {
 					testCtx.verify(t, tc.want.reserve, initialObjects, nil, status)
 				})
@@ -603,17 +633,32 @@ func TestPlugin(t *testing.T) {
 				if unschedulable {
 					initialObjects = testCtx.listAll(t)
 					initialObjects = testCtx.updateAPIServer(t, initialObjects, tc.prepare.unreserve)
-					testCtx.p.Unreserve(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Name)
+					testCtx.p.Unreserve(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Node().Name)
 					t.Run("unreserve", func(t *testing.T) {
 						testCtx.verify(t, tc.want.unreserve, initialObjects, nil, status)
 					})
 				} else {
 					initialObjects = testCtx.listAll(t)
-					initialObjects = testCtx.updateAPIServer(t, initialObjects, tc.prepare.postbind)
-					testCtx.p.PostBind(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Name)
-					t.Run("postbind", func(t *testing.T) {
-						testCtx.verify(t, tc.want.postbind, initialObjects, nil, status)
+					initialObjects = testCtx.updateAPIServer(t, initialObjects, tc.prepare.prebind)
+					status := testCtx.p.PreBind(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Node().Name)
+					t.Run("prebind", func(t *testing.T) {
+						testCtx.verify(t, tc.want.prebind, initialObjects, nil, status)
 					})
+
+					if tc.want.unreserveAfterBindFailure != nil {
+						initialObjects = testCtx.listAll(t)
+						testCtx.p.Unreserve(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Node().Name)
+						t.Run("unreserverAfterBindFailure", func(t *testing.T) {
+							testCtx.verify(t, *tc.want.unreserveAfterBindFailure, initialObjects, nil, status)
+						})
+					} else if status.IsSuccess() {
+						initialObjects = testCtx.listAll(t)
+						initialObjects = testCtx.updateAPIServer(t, initialObjects, tc.prepare.postbind)
+						testCtx.p.PostBind(testCtx.ctx, testCtx.state, tc.pod, selectedNode.Node().Name)
+						t.Run("postbind", func(t *testing.T) {
+							testCtx.verify(t, tc.want.postbind, initialObjects, nil, nil)
+						})
+					}
 				}
 			} else {
 				initialObjects = testCtx.listAll(t)
@@ -642,9 +687,7 @@ func (tc *testContext) verify(t *testing.T, expected result, initialObjects []me
 	assert.Equal(t, expected.status, status)
 	objects := tc.listAll(t)
 	wantObjects := update(t, initialObjects, expected.changes)
-	for _, add := range expected.added {
-		wantObjects = append(wantObjects, add)
-	}
+	wantObjects = append(wantObjects, expected.added...)
 	for _, remove := range expected.removed {
 		for i, obj := range wantObjects {
 			// This is a bit relaxed (no GVR comparison, no UID
@@ -770,7 +813,6 @@ func setup(t *testing.T, nodes []*v1.Node, claims []*resourcev1alpha2.ResourceCl
 	tc.client = fake.NewSimpleClientset()
 	reactor := createReactor(tc.client.Tracker())
 	tc.client.PrependReactor("*", "*", reactor)
-
 	tc.informerFactory = informers.NewSharedInformerFactory(tc.client, 0)
 
 	opts := []runtime.Option{
@@ -782,7 +824,7 @@ func setup(t *testing.T, nodes []*v1.Node, claims []*resourcev1alpha2.ResourceCl
 		t.Fatal(err)
 	}
 
-	pl, err := New(nil, fh, feature.Features{EnableDynamicResourceAllocation: true})
+	pl, err := New(ctx, nil, fh, feature.Features{EnableDynamicResourceAllocation: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -891,6 +933,7 @@ func Test_isSchedulableAfterClaimChange(t *testing.T) {
 		claims         []*resourcev1alpha2.ResourceClaim
 		oldObj, newObj interface{}
 		expectedHint   framework.QueueingHint
+		expectedErr    bool
 	}{
 		"skip-deletes": {
 			pod:          podWithClaimTemplate,
@@ -899,9 +942,9 @@ func Test_isSchedulableAfterClaimChange(t *testing.T) {
 			expectedHint: framework.QueueSkip,
 		},
 		"backoff-wrong-new-object": {
-			pod:          podWithClaimTemplate,
-			newObj:       "not-a-claim",
-			expectedHint: framework.QueueAfterBackoff,
+			pod:         podWithClaimTemplate,
+			newObj:      "not-a-claim",
+			expectedErr: true,
 		},
 		"skip-wrong-claim": {
 			pod: podWithClaimTemplate,
@@ -926,13 +969,13 @@ func Test_isSchedulableAfterClaimChange(t *testing.T) {
 		"queue-on-add": {
 			pod:          podWithClaimName,
 			newObj:       pendingImmediateClaim,
-			expectedHint: framework.QueueImmediately,
+			expectedHint: framework.Queue,
 		},
 		"backoff-wrong-old-object": {
-			pod:          podWithClaimName,
-			oldObj:       "not-a-claim",
-			newObj:       pendingImmediateClaim,
-			expectedHint: framework.QueueAfterBackoff,
+			pod:         podWithClaimName,
+			oldObj:      "not-a-claim",
+			newObj:      pendingImmediateClaim,
+			expectedErr: true,
 		},
 		"skip-adding-finalizer": {
 			pod:    podWithClaimName,
@@ -954,7 +997,7 @@ func Test_isSchedulableAfterClaimChange(t *testing.T) {
 				claim.Status.Allocation = &resourcev1alpha2.AllocationResult{}
 				return claim
 			}(),
-			expectedHint: framework.QueueImmediately,
+			expectedHint: framework.Queue,
 		},
 	}
 
@@ -971,7 +1014,13 @@ func Test_isSchedulableAfterClaimChange(t *testing.T) {
 					require.NoError(t, store.Update(claim))
 				}
 			}
-			actualHint := testCtx.p.isSchedulableAfterClaimChange(logger, tc.pod, tc.oldObj, tc.newObj)
+			actualHint, err := testCtx.p.isSchedulableAfterClaimChange(logger, tc.pod, tc.oldObj, tc.newObj)
+			if tc.expectedErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
 			require.Equal(t, tc.expectedHint, actualHint)
 		})
 	}
@@ -984,6 +1033,7 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 		claims         []*resourcev1alpha2.ResourceClaim
 		oldObj, newObj interface{}
 		expectedHint   framework.QueueingHint
+		expectedErr    bool
 	}{
 		"skip-deleted": {
 			pod:          podWithClaimTemplate,
@@ -998,18 +1048,18 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 			expectedHint: framework.QueueSkip,
 		},
 		"backoff-wrong-old-object": {
-			pod:          podWithClaimTemplate,
-			oldObj:       "not-a-scheduling-context",
-			newObj:       scheduling,
-			expectedHint: framework.QueueAfterBackoff,
+			pod:         podWithClaimTemplate,
+			oldObj:      "not-a-scheduling-context",
+			newObj:      scheduling,
+			expectedErr: true,
 		},
 		"backoff-missed-wrong-old-object": {
 			pod: podWithClaimTemplate,
 			oldObj: cache.DeletedFinalStateUnknown{
 				Obj: "not-a-scheduling-context",
 			},
-			newObj:       scheduling,
-			expectedHint: framework.QueueAfterBackoff,
+			newObj:      scheduling,
+			expectedErr: true,
 		},
 		"skip-unrelated-object": {
 			pod:    podWithClaimTemplate,
@@ -1022,10 +1072,10 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 			expectedHint: framework.QueueSkip,
 		},
 		"backoff-wrong-new-object": {
-			pod:          podWithClaimTemplate,
-			oldObj:       scheduling,
-			newObj:       "not-a-scheduling-context",
-			expectedHint: framework.QueueAfterBackoff,
+			pod:         podWithClaimTemplate,
+			oldObj:      scheduling,
+			newObj:      "not-a-scheduling-context",
+			expectedErr: true,
 		},
 		"skip-missing-claim": {
 			pod:          podWithClaimTemplate,
@@ -1045,7 +1095,7 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 			claims:       []*resourcev1alpha2.ResourceClaim{pendingDelayedClaim},
 			oldObj:       scheduling,
 			newObj:       schedulingInfo,
-			expectedHint: framework.QueueImmediately,
+			expectedHint: framework.Queue,
 		},
 		"queue-bad-selected-node": {
 			pod:    podWithClaimTemplateInStatus,
@@ -1061,7 +1111,7 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 				scheduling.Status.ResourceClaims[0].UnsuitableNodes = append(scheduling.Status.ResourceClaims[0].UnsuitableNodes, scheduling.Spec.SelectedNode)
 				return scheduling
 			}(),
-			expectedHint: framework.QueueImmediately,
+			expectedHint: framework.Queue,
 		},
 		"skip-spec-changes": {
 			pod:    podWithClaimTemplateInStatus,
@@ -1083,7 +1133,7 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 				scheduling.Finalizers = append(scheduling.Finalizers, "foo")
 				return scheduling
 			}(),
-			expectedHint: framework.QueueAfterBackoff,
+			expectedHint: framework.Queue,
 		},
 	}
 
@@ -1093,7 +1143,13 @@ func Test_isSchedulableAfterPodSchedulingContextChange(t *testing.T) {
 			t.Parallel()
 			logger, _ := ktesting.NewTestContext(t)
 			testCtx := setup(t, nil, tc.claims, nil, tc.schedulings)
-			actualHint := testCtx.p.isSchedulableAfterPodSchedulingContextChange(logger, tc.pod, tc.oldObj, tc.newObj)
+			actualHint, err := testCtx.p.isSchedulableAfterPodSchedulingContextChange(logger, tc.pod, tc.oldObj, tc.newObj)
+			if tc.expectedErr {
+				require.Error(t, err)
+				return
+			}
+
+			require.NoError(t, err)
 			require.Equal(t, tc.expectedHint, actualHint)
 		})
 	}

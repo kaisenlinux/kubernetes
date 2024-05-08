@@ -60,7 +60,7 @@ func PerformPostUpgradeTasks(client clientset.Interface, cfg *kubeadmapi.InitCon
 	}
 
 	// Create the new, version-branched kubelet ComponentConfig ConfigMap
-	if err := kubeletphase.CreateConfigMap(&cfg.ClusterConfiguration, patchesDir, client); err != nil {
+	if err := kubeletphase.CreateConfigMap(&cfg.ClusterConfiguration, client); err != nil {
 		errs = append(errs, errors.Wrap(err, "error creating kubelet configuration ConfigMap"))
 	}
 
@@ -248,6 +248,7 @@ func unupgradedControlPlaneInstances(client clientset.Interface, nodeName string
 	return nil, nil
 }
 
+// WriteKubeletConfigFiles writes the kubelet config file to disk, but first creates a backup of any existing one.
 func WriteKubeletConfigFiles(cfg *kubeadmapi.InitConfiguration, patchesDir string, dryRun bool, out io.Writer) error {
 	// Set up the kubelet directory to use. If dry-running, this will return a fake directory
 	kubeletDir, err := GetKubeletDir(dryRun)
@@ -295,27 +296,4 @@ func GetKubeletDir(dryRun bool) (string, error) {
 		return kubeadmconstants.CreateTempDirForKubeadm("", "kubeadm-upgrade-dryrun")
 	}
 	return kubeadmconstants.KubeletRunDirectory, nil
-}
-
-// moveFiles moves files from one directory to another.
-func moveFiles(files map[string]string) error {
-	filesToRecover := make(map[string]string, len(files))
-	for from, to := range files {
-		if err := os.Rename(from, to); err != nil {
-			return rollbackFiles(filesToRecover, err)
-		}
-		filesToRecover[to] = from
-	}
-	return nil
-}
-
-// rollbackFiles moves the files back to the original directory.
-func rollbackFiles(files map[string]string, originalErr error) error {
-	errs := []error{originalErr}
-	for from, to := range files {
-		if err := os.Rename(from, to); err != nil {
-			errs = append(errs, err)
-		}
-	}
-	return errors.Errorf("couldn't move these files: %v. Got errors: %v", files, errorsutil.NewAggregate(errs))
 }

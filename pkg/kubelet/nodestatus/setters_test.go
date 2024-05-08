@@ -28,6 +28,8 @@ import (
 
 	cadvisorapiv1 "github.com/google/cadvisor/info/v1"
 	"github.com/google/go-cmp/cmp"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	v1 "k8s.io/api/core/v1"
 	apiequality "k8s.io/apimachinery/pkg/api/equality"
@@ -35,9 +37,12 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/rand"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	cloudprovider "k8s.io/cloud-provider"
 	fakecloud "k8s.io/cloud-provider/fake"
+	featuregatetesting "k8s.io/component-base/featuregate/testing"
 	"k8s.io/component-base/version"
+	"k8s.io/kubernetes/pkg/features"
 	"k8s.io/kubernetes/pkg/kubelet/cm"
 	kubecontainer "k8s.io/kubernetes/pkg/kubelet/container"
 	kubecontainertest "k8s.io/kubernetes/pkg/kubelet/container/testing"
@@ -46,9 +51,6 @@ import (
 	"k8s.io/kubernetes/pkg/volume"
 	volumetest "k8s.io/kubernetes/pkg/volume/testing"
 	netutils "k8s.io/utils/net"
-
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
 const (
@@ -223,7 +225,7 @@ func TestNodeAddress(t *testing.T) {
 			shouldError:      false,
 		},
 		{
-			name:              "cloud provider is external",
+			name:              "cloud provider is external and nodeIP specified",
 			nodeIP:            netutils.ParseIPSloppy("10.0.0.1"),
 			nodeAddresses:     []v1.NodeAddress{},
 			cloudProviderType: cloudProviderExternal,
@@ -232,6 +234,21 @@ func TestNodeAddress(t *testing.T) {
 				{Type: v1.NodeHostName, Address: testKubeletHostname},
 			},
 			shouldError: false,
+		},
+		{
+			name:              "cloud provider is external and nodeIP unspecified",
+			nodeIP:            netutils.ParseIPSloppy("::"),
+			nodeAddresses:     []v1.NodeAddress{},
+			cloudProviderType: cloudProviderExternal,
+			expectedAddresses: []v1.NodeAddress{},
+			shouldError:       false,
+		},
+		{
+			name:              "cloud provider is external and no nodeIP",
+			nodeAddresses:     []v1.NodeAddress{},
+			cloudProviderType: cloudProviderExternal,
+			expectedAddresses: []v1.NodeAddress{},
+			shouldError:       false,
 		},
 		{
 			name: "cloud doesn't report hostname, no override, detected hostname mismatch",
@@ -1244,6 +1261,7 @@ func TestVersionInfo(t *testing.T) {
 		runtimeVersionError error
 		expectNode          *v1.Node
 		expectError         error
+		kubeProxyVersion    bool
 	}{
 		{
 			desc: "versions set in node info",
@@ -1267,6 +1285,7 @@ func TestVersionInfo(t *testing.T) {
 					},
 				},
 			},
+			kubeProxyVersion: true,
 		},
 		{
 			desc:             "error getting version info",
@@ -1274,6 +1293,7 @@ func TestVersionInfo(t *testing.T) {
 			versionInfoError: fmt.Errorf("foo"),
 			expectNode:       &v1.Node{},
 			expectError:      fmt.Errorf("error getting version info: foo"),
+			kubeProxyVersion: true,
 		},
 		{
 			desc:                "error getting runtime version results in Unknown runtime",
@@ -1290,11 +1310,70 @@ func TestVersionInfo(t *testing.T) {
 					},
 				},
 			},
+			kubeProxyVersion: true,
+		},
+		{
+			desc: "DisableNodeKubeProxyVersion FeatureGate enable, versions set in node info",
+			node: &v1.Node{},
+			versionInfo: &cadvisorapiv1.VersionInfo{
+				KernelVersion:      "KernelVersion",
+				ContainerOsVersion: "ContainerOSVersion",
+			},
+			runtimeType: "RuntimeType",
+			runtimeVersion: &kubecontainertest.FakeVersion{
+				Version: "RuntimeVersion",
+			},
+			expectNode: &v1.Node{
+				Status: v1.NodeStatus{
+					NodeInfo: v1.NodeSystemInfo{
+						KernelVersion:           "KernelVersion",
+						OSImage:                 "ContainerOSVersion",
+						ContainerRuntimeVersion: "RuntimeType://RuntimeVersion",
+						KubeletVersion:          version.Get().String(),
+					},
+				},
+			},
+			kubeProxyVersion: false,
+		},
+		{
+			desc: "DisableNodeKubeProxyVersion FeatureGate enable, KubeProxyVersion will be cleared if it is set.",
+			node: &v1.Node{
+				Status: v1.NodeStatus{
+					NodeInfo: v1.NodeSystemInfo{
+						KernelVersion:           "KernelVersion",
+						OSImage:                 "ContainerOSVersion",
+						ContainerRuntimeVersion: "RuntimeType://RuntimeVersion",
+						KubeletVersion:          version.Get().String(),
+						KubeProxyVersion:        version.Get().String(),
+					},
+				},
+			},
+			versionInfo: &cadvisorapiv1.VersionInfo{
+				KernelVersion:      "KernelVersion",
+				ContainerOsVersion: "ContainerOSVersion",
+			},
+			runtimeType: "RuntimeType",
+			runtimeVersion: &kubecontainertest.FakeVersion{
+				Version: "RuntimeVersion",
+			},
+			expectNode: &v1.Node{
+				Status: v1.NodeStatus{
+					NodeInfo: v1.NodeSystemInfo{
+						KernelVersion:           "KernelVersion",
+						OSImage:                 "ContainerOSVersion",
+						ContainerRuntimeVersion: "RuntimeType://RuntimeVersion",
+						KubeletVersion:          version.Get().String(),
+					},
+				},
+			},
+			kubeProxyVersion: false,
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.desc, func(t *testing.T) {
+			defer featuregatetesting.SetFeatureGateDuringTest(t, utilfeature.DefaultFeatureGate, features.DisableNodeKubeProxyVersion, !tc.kubeProxyVersion)()
+
 			ctx := context.Background()
 			versionInfoFunc := func() (*cadvisorapiv1.VersionInfo, error) {
 				return tc.versionInfo, tc.versionInfoError
@@ -1430,7 +1509,6 @@ func TestReadyCondition(t *testing.T) {
 		runtimeErrors                        error
 		networkErrors                        error
 		storageErrors                        error
-		appArmorValidateHostFunc             func() error
 		cmStatus                             cm.Status
 		nodeShutdownManagerErrors            error
 		expectConditions                     []v1.NodeCondition
@@ -1444,19 +1522,6 @@ func TestReadyCondition(t *testing.T) {
 			// TODO(mtaufen): The current behavior is that we don't send an event for the initial NodeReady condition,
 			// the reason for this is unclear, so we may want to actually send an event, and change these test cases
 			// to ensure an event is sent.
-		},
-		{
-			desc:                     "new, ready: apparmor validator passed",
-			node:                     withCapacity.DeepCopy(),
-			appArmorValidateHostFunc: func() error { return nil },
-			expectConditions:         []v1.NodeCondition{*makeReadyCondition(true, "kubelet is posting ready status. AppArmor enabled", now, now)},
-		},
-		{
-			desc:                     "new, ready: apparmor validator failed",
-			node:                     withCapacity.DeepCopy(),
-			appArmorValidateHostFunc: func() error { return fmt.Errorf("foo") },
-			// absence of an additional message is understood to mean that AppArmor is disabled
-			expectConditions: []v1.NodeCondition{*makeReadyCondition(true, "kubelet is posting ready status", now, now)},
 		},
 		{
 			desc: "new, ready: soft requirement warning",
@@ -1576,7 +1641,7 @@ func TestReadyCondition(t *testing.T) {
 				})
 			}
 			// construct setter
-			setter := ReadyCondition(nowFunc, runtimeErrorsFunc, networkErrorsFunc, storageErrorsFunc, tc.appArmorValidateHostFunc, cmStatusFunc, nodeShutdownErrorsFunc, recordEventFunc, !tc.disableLocalStorageCapacityIsolation)
+			setter := ReadyCondition(nowFunc, runtimeErrorsFunc, networkErrorsFunc, storageErrorsFunc, cmStatusFunc, nodeShutdownErrorsFunc, recordEventFunc, !tc.disableLocalStorageCapacityIsolation)
 			// call setter on node
 			if err := setter(ctx, tc.node); err != nil {
 				t.Fatalf("unexpected error: %v", err)

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	gcm "google.golang.org/api/monitoring/v3"
@@ -31,6 +32,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/wait"
 	clientset "k8s.io/client-go/kubernetes"
+	"k8s.io/kubernetes/test/e2e/feature"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2edeployment "k8s.io/kubernetes/test/e2e/framework/deployment"
 	e2eskipper "k8s.io/kubernetes/test/e2e/framework/skipper"
@@ -53,7 +55,7 @@ type externalMetricTarget struct {
 	isAverage bool
 }
 
-var _ = SIGDescribe("[HPA] [Feature:CustomMetricsAutoscaling] Horizontal pod autoscaling (scale resource: Custom Metrics from Stackdriver)", func() {
+var _ = SIGDescribe("[HPA]", feature.CustomMetricsAutoscaling, "Horizontal pod autoscaling (scale resource: Custom Metrics from Stackdriver)", func() {
 	ginkgo.BeforeEach(func() {
 		e2eskipper.SkipUnlessProviderIs("gce", "gke")
 	})
@@ -418,6 +420,9 @@ func (tc *CustomMetricTestCase) Run(ctx context.Context) {
 	// Set up a cluster: create a custom metric and set up k8s-sd adapter
 	err = monitoring.CreateDescriptors(gcmService, projectID)
 	if err != nil {
+		if strings.Contains(err.Error(), "Request throttled") {
+			e2eskipper.Skipf("Skipping...hitting rate limits on creating and updating metrics/labels")
+		}
 		framework.Failf("Failed to create metric descriptor: %v", err)
 	}
 	defer monitoring.CleanupDescriptors(gcmService, projectID)
@@ -594,7 +599,7 @@ func hpa(name, namespace, deploymentName string, minReplicas, maxReplicas int32,
 
 func waitForReplicas(ctx context.Context, deploymentName, namespace string, cs clientset.Interface, timeout time.Duration, desiredReplicas int) {
 	interval := 20 * time.Second
-	err := wait.PollImmediateWithContext(ctx, interval, timeout, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (bool, error) {
 		deployment, err := cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
 		if err != nil {
 			framework.Failf("Failed to get replication controller %s: %v", deployment, err)
@@ -610,10 +615,10 @@ func waitForReplicas(ctx context.Context, deploymentName, namespace string, cs c
 
 func ensureDesiredReplicasInRange(ctx context.Context, deploymentName, namespace string, cs clientset.Interface, minDesiredReplicas, maxDesiredReplicas int, timeout time.Duration) {
 	interval := 60 * time.Second
-	err := wait.PollImmediateWithContext(ctx, interval, timeout, func(ctx context.Context) (bool, error) {
+	err := wait.PollUntilContextTimeout(ctx, interval, timeout, true, func(ctx context.Context) (bool, error) {
 		deployment, err := cs.AppsV1().Deployments(namespace).Get(ctx, deploymentName, metav1.GetOptions{})
 		if err != nil {
-			framework.Failf("Failed to get replication controller %s: %v", deployment, err)
+			return true, err
 		}
 		replicas := int(deployment.Status.ReadyReplicas)
 		framework.Logf("expecting there to be in [%d, %d] replicas (are: %d)", minDesiredReplicas, maxDesiredReplicas, replicas)
@@ -626,7 +631,7 @@ func ensureDesiredReplicasInRange(ctx context.Context, deploymentName, namespace
 		}
 	})
 	// The call above always returns an error, but if it is timeout, it's OK (condition satisfied all the time).
-	if err == wait.ErrWaitTimeout {
+	if wait.Interrupted(err) || strings.Contains(err.Error(), "would exceed context deadline") {
 		framework.Logf("Number of replicas was stable over %v", timeout)
 		return
 	}

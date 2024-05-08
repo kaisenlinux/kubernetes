@@ -31,7 +31,7 @@ import (
 	utilvalidation "k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/apimachinery/pkg/util/validation/field"
 	plugincel "k8s.io/apiserver/pkg/admission/plugin/cel"
-	"k8s.io/apiserver/pkg/admission/plugin/validatingadmissionpolicy"
+	validatingadmissionpolicy "k8s.io/apiserver/pkg/admission/plugin/policy/validating"
 	"k8s.io/apiserver/pkg/admission/plugin/webhook/matchconditions"
 	"k8s.io/apiserver/pkg/cel"
 	"k8s.io/apiserver/pkg/cel/environment"
@@ -854,10 +854,10 @@ func validateMatchResources(mc *admissionregistration.MatchResources, fldPath *f
 	}
 
 	if mc.ObjectSelector == nil {
-		allErrors = append(allErrors, field.Required(fldPath.Child("labelSelector"), ""))
+		allErrors = append(allErrors, field.Required(fldPath.Child("objectSelector"), ""))
 	} else {
 		// validate selector strictly, this type was released after issue #99139 was resolved
-		allErrors = append(allErrors, metav1validation.ValidateLabelSelector(mc.ObjectSelector, metav1validation.LabelSelectorValidationOptions{}, fldPath.Child("labelSelector"))...)
+		allErrors = append(allErrors, metav1validation.ValidateLabelSelector(mc.ObjectSelector, metav1validation.LabelSelectorValidationOptions{}, fldPath.Child("objectSelector"))...)
 	}
 
 	for i, namedRuleWithOperations := range mc.ResourceRules {

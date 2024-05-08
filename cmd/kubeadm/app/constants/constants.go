@@ -28,7 +28,6 @@ import (
 
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/version"
-	"k8s.io/apimachinery/pkg/util/wait"
 	apimachineryversion "k8s.io/apimachinery/pkg/version"
 	componentversion "k8s.io/component-base/version"
 	netutils "k8s.io/utils/net"
@@ -146,8 +145,11 @@ const (
 	// FrontProxyClientCertCommonName defines front proxy certificate common name
 	FrontProxyClientCertCommonName = "front-proxy-client" //used as subject.commonname attribute (CN)
 
-	// AdminKubeConfigFileName defines name for the kubeconfig aimed to be used by the superuser/admin of the cluster
+	// AdminKubeConfigFileName defines name for the kubeconfig aimed to be used by the admin of the cluster
 	AdminKubeConfigFileName = "admin.conf"
+	// SuperAdminKubeConfigFileName defines name for the kubeconfig aimed to be used by the super-admin of the cluster
+	SuperAdminKubeConfigFileName = "super-admin.conf"
+
 	// KubeletBootstrapKubeConfigFileName defines the file name for the kubeconfig that the kubelet will use to do
 	// the TLS bootstrap to get itself an unique credential
 	KubeletBootstrapKubeConfigFileName = "bootstrap-kubelet.conf"
@@ -201,28 +203,44 @@ const (
 	NodeAutoApproveBootstrapClusterRoleBinding = "kubeadm:node-autoapprove-bootstrap"
 	// NodeAutoApproveCertificateRotationClusterRoleBinding defines name of the ClusterRoleBinding that makes the csrapprover approve node auto rotated CSRs
 	NodeAutoApproveCertificateRotationClusterRoleBinding = "kubeadm:node-autoapprove-certificate-rotation"
+	// ClusterAdminsGroupAndClusterRoleBinding is the name of the Group used for kubeadm generated cluster
+	// admin credentials and the name of the ClusterRoleBinding that binds the same Group to the "cluster-admin"
+	// built-in ClusterRole.
+	ClusterAdminsGroupAndClusterRoleBinding = "kubeadm:cluster-admins"
 
-	// APICallRetryInterval defines how long kubeadm should wait before retrying a failed API operation
-	APICallRetryInterval = 500 * time.Millisecond
+	// KubernetesAPICallTimeout specifies how long kubeadm should wait for API calls
+	KubernetesAPICallTimeout = 1 * time.Minute
+	// KubernetesAPICallRetryInterval defines how long kubeadm should wait before retrying a failed API operation
+	KubernetesAPICallRetryInterval = 500 * time.Millisecond
+
+	// DiscoveryTimeout specifies the default discovery timeout for kubeadm (used unless one is specified in the JoinConfiguration)
+	DiscoveryTimeout = 5 * time.Minute
 	// DiscoveryRetryInterval specifies how long kubeadm should wait before retrying to connect to the control-plane when doing discovery
 	DiscoveryRetryInterval = 5 * time.Second
-	// PatchNodeTimeout specifies how long kubeadm should wait for applying the label and taint on the control-plane before timing out
-	PatchNodeTimeout = 2 * time.Minute
+
 	// TLSBootstrapTimeout specifies how long kubeadm should wait for the kubelet to perform the TLS Bootstrap
 	TLSBootstrapTimeout = 5 * time.Minute
 	// TLSBootstrapRetryInterval specifies how long kubeadm should wait before retrying the TLS Bootstrap check
 	TLSBootstrapRetryInterval = 1 * time.Second
-	// APICallWithWriteTimeout specifies how long kubeadm should wait for api calls with at least one write
-	APICallWithWriteTimeout = 40 * time.Second
-	// APICallWithReadTimeout specifies how long kubeadm should wait for api calls with only reads
-	APICallWithReadTimeout = 15 * time.Second
+
+	// EtcdAPICallTimeout specifies how much time to wait for completion of requests against the etcd API.
+	EtcdAPICallTimeout = 2 * time.Minute
+	// EtcdAPICallRetryInterval specifies how frequently to retry requests against the etcd API.
+	EtcdAPICallRetryInterval = 500 * time.Millisecond
+
+	// ControlPlaneComponentHealthCheckTimeout specifies the default control plane component health check timeout
+	ControlPlaneComponentHealthCheckTimeout = 4 * time.Minute
+
+	// KubeletHealthCheckTimeout specifies the default kubelet timeout
+	KubeletHealthCheckTimeout = 4 * time.Minute
+
+	// UpgradeManifestsTimeout specifies the default timeout for upgradring static Pod manifests
+	UpgradeManifestsTimeout = 5 * time.Minute
+
 	// PullImageRetry specifies how many times ContainerRuntime retries when pulling image failed
 	PullImageRetry = 5
 	// RemoveContainerRetry specifies how many times ContainerRuntime retries when removing container failed
 	RemoveContainerRetry = 5
-
-	// DefaultControlPlaneTimeout specifies the default control plane (actually API Server) timeout for use by kubeadm
-	DefaultControlPlaneTimeout = 4 * time.Minute
 
 	// MinimumAddressesInServiceSubnet defines minimum amount of nodes the Service subnet should allow.
 	// We need at least ten, because the DNS service is always at the tenth cluster clusterIP
@@ -260,9 +278,6 @@ const (
 	// AnnotationKubeadmCRISocket specifies the annotation kubeadm uses to preserve the crisocket information given to kubeadm at
 	// init/join time for use later. kubeadm annotates the node object with this information
 	AnnotationKubeadmCRISocket = "kubeadm.alpha.kubernetes.io/cri-socket"
-
-	// UnknownCRISocket defines the undetected or unknown CRI socket
-	UnknownCRISocket = "unix:///var/run/unknown.sock"
 
 	// KubeadmConfigConfigMap specifies in what ConfigMap in the kube-system namespace the `kubeadm init` configuration should be stored
 	KubeadmConfigConfigMap = "kubeadm-config"
@@ -305,7 +320,7 @@ const (
 	MinExternalEtcdVersion = "3.4.13-4"
 
 	// DefaultEtcdVersion indicates the default etcd version that kubeadm uses
-	DefaultEtcdVersion = "3.5.9-0"
+	DefaultEtcdVersion = "3.5.12-0"
 
 	// Etcd defines variable used internally when referring to etcd component
 	Etcd = "etcd"
@@ -321,6 +336,8 @@ const (
 	CoreDNS = "CoreDNS"
 	// Kubelet defines variable used internally when referring to the Kubelet
 	Kubelet = "kubelet"
+	// Kubeadm defines variable used internally when referring to the kubeadm component
+	Kubeadm = "kubeadm"
 
 	// KubeCertificatesVolumeName specifies the name for the Volume that is used for injecting certificates to control plane components (can be both a hostPath volume or a projected, all-in-one volume)
 	KubeCertificatesVolumeName = "k8s-certs"
@@ -341,7 +358,7 @@ const (
 	CoreDNSImageName = "coredns"
 
 	// CoreDNSVersion is the version of CoreDNS to be deployed if it is used
-	CoreDNSVersion = "v1.10.1"
+	CoreDNSVersion = "v1.11.1"
 
 	// ClusterConfigurationKind is the string kind value for the ClusterConfiguration struct
 	ClusterConfigurationKind = "ClusterConfiguration"
@@ -431,6 +448,8 @@ const (
 	EtcdUserName string = "kubeadm-etcd"
 	// ServiceAccountKeyReadersGroupName is the group of users that are allowed to read the service account private key.
 	ServiceAccountKeyReadersGroupName string = "kubeadm-sa-key-readers"
+	// UpgradeConfigurationKind is the string kind value for the UpgradeConfiguration struct
+	UpgradeConfigurationKind = "UpgradeConfiguration"
 )
 
 var (
@@ -453,34 +472,27 @@ var (
 	MinimumControlPlaneVersion = getSkewedKubernetesVersion(-1)
 
 	// MinimumKubeletVersion specifies the minimum version of kubelet which kubeadm supports
-	MinimumKubeletVersion = getSkewedKubernetesVersion(-1)
+	MinimumKubeletVersion = getSkewedKubernetesVersion(-3)
 
 	// CurrentKubernetesVersion specifies current Kubernetes version supported by kubeadm
 	CurrentKubernetesVersion = getSkewedKubernetesVersion(0)
 
 	// SupportedEtcdVersion lists officially supported etcd versions with corresponding Kubernetes releases
 	SupportedEtcdVersion = map[uint8]string{
-		22: "3.5.9-0",
-		23: "3.5.9-0",
-		24: "3.5.9-0",
-		25: "3.5.9-0",
-		26: "3.5.9-0",
-		27: "3.5.9-0",
-		28: "3.5.9-0",
+		22: "3.5.12-0",
+		23: "3.5.12-0",
+		24: "3.5.12-0",
+		25: "3.5.12-0",
+		26: "3.5.12-0",
+		27: "3.5.12-0",
+		28: "3.5.12-0",
+		29: "3.5.12-0",
+		30: "3.5.12-0",
 	}
 
 	// KubeadmCertsClusterRoleName sets the name for the ClusterRole that allows
 	// the bootstrap tokens to access the kubeadm-certs Secret during the join of a new control-plane
 	KubeadmCertsClusterRoleName = fmt.Sprintf("kubeadm:%s", KubeadmCertsSecret)
-
-	// StaticPodMirroringDefaultRetry is used a backoff strategy for
-	// waiting for static pods to be mirrored to the apiserver.
-	StaticPodMirroringDefaultRetry = wait.Backoff{
-		Steps:    30,
-		Duration: 1 * time.Second,
-		Factor:   1.0,
-		Jitter:   0.1,
-	}
 
 	// defaultKubernetesPlaceholderVersion is a placeholder version in case the component-base
 	// version was not populated during build.
@@ -567,6 +579,11 @@ func GetStaticPodFilepath(componentName, manifestsDir string) string {
 // GetAdminKubeConfigPath returns the location on the disk where admin kubeconfig is located by default
 func GetAdminKubeConfigPath() string {
 	return filepath.Join(KubernetesDir, AdminKubeConfigFileName)
+}
+
+// GetSuperAdminKubeConfigPath returns the location on the disk where admin kubeconfig is located by default
+func GetSuperAdminKubeConfigPath() string {
+	return filepath.Join(KubernetesDir, SuperAdminKubeConfigFileName)
 }
 
 // GetBootstrapKubeletKubeConfigPath returns the location on the disk where bootstrap kubelet kubeconfig is located by default

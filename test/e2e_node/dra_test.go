@@ -18,7 +18,7 @@ limitations under the License.
 E2E Node test for DRA (Dynamic Resource Allocation)
 This test covers node-specific aspects of DRA
 The test can be run locally on Linux this way:
-  make test-e2e-node FOCUS='\[NodeFeature:DynamicResourceAllocation\]' SKIP='\[Flaky\]' PARALLELISM=1 \
+  make test-e2e-node FOCUS='\[NodeAlphaFeature:DynamicResourceAllocation\]' SKIP='\[Flaky\]' PARALLELISM=1 \
        TEST_ARGS='--feature-gates="DynamicResourceAllocation=true" --service-feature-gates="DynamicResourceAllocation=true" --runtime-config=api/all=true'
 */
 
@@ -42,6 +42,7 @@ import (
 	dra "k8s.io/kubernetes/pkg/kubelet/cm/dra/plugin"
 	admissionapi "k8s.io/pod-security-admission/api"
 
+	"k8s.io/kubernetes/test/e2e/feature"
 	"k8s.io/kubernetes/test/e2e/framework"
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 
@@ -59,15 +60,15 @@ const (
 	podInPendingStateTimeout  = time.Second * 60 // how long to wait for a pod to stay in pending state
 )
 
-var _ = ginkgo.Describe("[sig-node] DRA [Feature:DynamicResourceAllocation][NodeAlphaFeature:DynamicResourceAllocation]", func() {
+var _ = framework.SIGDescribe("node")("DRA", feature.DynamicResourceAllocation, "[NodeAlphaFeature:DynamicResourceAllocation]", func() {
 	f := framework.NewDefaultFramework("dra-node")
 	f.NamespacePodSecurityLevel = admissionapi.LevelBaseline
 
 	var kubeletPlugin *testdriver.ExamplePlugin
 
-	ginkgo.Context("Resource Kubelet Plugin [Serial]", func() {
+	f.Context("Resource Kubelet Plugin", f.WithSerial(), func() {
 		ginkgo.BeforeEach(func(ctx context.Context) {
-			kubeletPlugin = newKubeletPlugin(getNodeName(ctx, f))
+			kubeletPlugin = newKubeletPlugin(ctx, getNodeName(ctx, f))
 		})
 
 		ginkgo.It("must register after Kubelet restart", func(ctx context.Context) {
@@ -87,7 +88,7 @@ var _ = ginkgo.Describe("[sig-node] DRA [Feature:DynamicResourceAllocation][Node
 		ginkgo.It("must register after plugin restart", func(ctx context.Context) {
 			ginkgo.By("restart Kubelet Plugin")
 			kubeletPlugin.Stop()
-			kubeletPlugin = newKubeletPlugin(getNodeName(ctx, f))
+			kubeletPlugin = newKubeletPlugin(ctx, getNodeName(ctx, f))
 
 			ginkgo.By("wait for Kubelet plugin re-registration")
 			gomega.Eventually(kubeletPlugin.GetGRPCCalls).WithTimeout(pluginRegistrationTimeout).Should(testdriver.BeRegistered)
@@ -133,9 +134,10 @@ var _ = ginkgo.Describe("[sig-node] DRA [Feature:DynamicResourceAllocation][Node
 })
 
 // Run Kubelet plugin and wait until it's registered
-func newKubeletPlugin(nodeName string) *testdriver.ExamplePlugin {
+func newKubeletPlugin(ctx context.Context, nodeName string) *testdriver.ExamplePlugin {
 	ginkgo.By("start Kubelet plugin")
 	logger := klog.LoggerWithValues(klog.LoggerWithName(klog.Background(), "kubelet plugin"), "node", nodeName)
+	ctx = klog.NewContext(ctx, logger)
 
 	// Ensure that directories exist, creating them if necessary. We want
 	// to know early if there is a setup problem that would prevent
@@ -146,7 +148,7 @@ func newKubeletPlugin(nodeName string) *testdriver.ExamplePlugin {
 	framework.ExpectNoError(err, "create socket directory")
 
 	plugin, err := testdriver.StartPlugin(
-		logger,
+		ctx,
 		cdiDir,
 		driverName,
 		"",

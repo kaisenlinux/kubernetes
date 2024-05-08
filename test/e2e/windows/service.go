@@ -36,7 +36,7 @@ import (
 	"github.com/onsi/gomega"
 )
 
-var _ = SIGDescribe("Services", func() {
+var _ = sigDescribe("Services", skipUnlessWindows(func() {
 	f := framework.NewDefaultFramework("services")
 	f.NamespacePodSecurityLevel = admissionapi.LevelPrivileged
 
@@ -82,8 +82,7 @@ var _ = SIGDescribe("Services", func() {
 		// Admission controllers may sometimes do the wrong thing
 		gomega.Expect(testPod.Spec.NodeSelector).To(gomega.HaveKeyWithValue("kubernetes.io/os", "windows"), "pod.spec.nodeSelector")
 		ginkgo.By(fmt.Sprintf("checking connectivity Pod to curl http://%s:%d", nodeIP, nodePort))
-		assertConsistentConnectivity(ctx, f, testPod.ObjectMeta.Name, windowsOS, windowsCheck(fmt.Sprintf("http://%s", net.JoinHostPort(nodeIP, strconv.Itoa(nodePort)))))
+		assertConsistentConnectivity(ctx, f, testPod.ObjectMeta.Name, windowsOS, windowsCheck(fmt.Sprintf("http://%s", net.JoinHostPort(nodeIP, strconv.Itoa(nodePort)))), internalMaxTries)
 
 	})
-
-})
+}))

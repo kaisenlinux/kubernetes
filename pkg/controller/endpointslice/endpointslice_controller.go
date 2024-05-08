@@ -60,7 +60,7 @@ const (
 	// 1s, 2s, 4s, 8s, 16s, 32s, 64s, 128s, 256s, 512s, 1000s (max)
 	maxRetries = 15
 
-	// endpointSliceChangeMinSyncDelay indicates the mininum delay before
+	// endpointSliceChangeMinSyncDelay indicates the minimum delay before
 	// queuing a syncService call after an EndpointSlice changes. If
 	// endpointUpdatesBatchPeriod is greater than this value, it will be used
 	// instead. This helps batch processing of changes to multiple
@@ -86,7 +86,7 @@ func NewController(ctx context.Context, podInformer coreinformers.PodInformer,
 	client clientset.Interface,
 	endpointUpdatesBatchPeriod time.Duration,
 ) *Controller {
-	broadcaster := record.NewBroadcaster()
+	broadcaster := record.NewBroadcaster(record.WithContext(ctx))
 	recorder := broadcaster.NewRecorder(scheme.Scheme, v1.EventSource{Component: "endpoint-slice-controller"})
 
 	endpointslicemetrics.RegisterMetrics()
@@ -175,6 +175,7 @@ func NewController(ctx context.Context, podInformer coreinformers.PodInformer,
 		c.topologyCache,
 		c.eventRecorder,
 		controllerName,
+		endpointslicerec.WithTrafficDistributionEnabled(utilfeature.DefaultFeatureGate.Enabled(features.ServiceTrafficDistribution)),
 	)
 
 	return c

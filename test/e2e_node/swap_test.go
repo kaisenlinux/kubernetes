@@ -19,6 +19,9 @@ package e2enode
 import (
 	"context"
 	"fmt"
+	"path/filepath"
+	"strconv"
+
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	v1 "k8s.io/api/core/v1"
@@ -32,8 +35,6 @@ import (
 	e2epod "k8s.io/kubernetes/test/e2e/framework/pod"
 	testutils "k8s.io/kubernetes/test/utils"
 	admissionapi "k8s.io/pod-security-admission/api"
-	"path/filepath"
-	"strconv"
 )
 
 const (
@@ -43,7 +44,7 @@ const (
 	cgroupV1MemLimitFile  = "/memory/memory.limit_in_bytes"
 )
 
-var _ = SIGDescribe("Swap [NodeConformance][LinuxOnly]", func() {
+var _ = SIGDescribe("Swap", framework.WithNodeConformance(), "[LinuxOnly]", func() {
 	f := framework.NewDefaultFramework("swap-test")
 	f.NamespacePodSecurityEnforceLevel = admissionapi.LevelBaseline
 
@@ -54,16 +55,17 @@ var _ = SIGDescribe("Swap [NodeConformance][LinuxOnly]", func() {
 
 		isCgroupV2 := isPodCgroupV2(f, pod)
 		isLimitedSwap := isLimitedSwap(f, pod)
+		isNoSwap := isNoSwap(f, pod)
 
-		if !isSwapFeatureGateEnabled() || !isCgroupV2 || (isLimitedSwap && (qosClass != v1.PodQOSBurstable || memoryRequestEqualLimit)) {
-			ginkgo.By(fmt.Sprintf("Expecting no swap. feature gate on? %t isCgroupV2? %t is QoS burstable? %t", isSwapFeatureGateEnabled(), isCgroupV2, qosClass == v1.PodQOSBurstable))
+		if !isSwapFeatureGateEnabled() || !isCgroupV2 || isNoSwap || (isLimitedSwap && (qosClass != v1.PodQOSBurstable || memoryRequestEqualLimit)) {
+			ginkgo.By(fmt.Sprintf("Expecting no swap. isNoSwap? %t, feature gate on? %t isCgroupV2? %t is QoS burstable? %t", isNoSwap, isSwapFeatureGateEnabled(), isCgroupV2, qosClass == v1.PodQOSBurstable))
 			expectNoSwap(f, pod, isCgroupV2)
 			return
 		}
 
 		if !isLimitedSwap {
-			ginkgo.By("expecting unlimited swap")
-			expectUnlimitedSwap(f, pod, isCgroupV2)
+			ginkgo.By("expecting no swap")
+			expectNoSwap(f, pod, isCgroupV2)
 			return
 		}
 
@@ -175,16 +177,6 @@ func expectNoSwap(f *framework.Framework, pod *v1.Pod, isCgroupV2 bool) {
 	}
 }
 
-func expectUnlimitedSwap(f *framework.Framework, pod *v1.Pod, isCgroupV2 bool) {
-	if isCgroupV2 {
-		swapLimit := readCgroupFile(f, pod, cgroupV2SwapLimitFile)
-		gomega.ExpectWithOffset(1, swapLimit).To(gomega.Equal("max"), "max swap allowed should be \"max\"")
-	} else {
-		swapPlusMemLimit := readCgroupFile(f, pod, cgroupV1SwapLimitFile)
-		gomega.ExpectWithOffset(1, swapPlusMemLimit).To(gomega.Equal("-1"))
-	}
-}
-
 // supports v2 only as v1 shouldn't support LimitedSwap
 func expectLimitedSwap(f *framework.Framework, pod *v1.Pod, expectedSwapLimit int64) {
 	swapLimitStr := readCgroupFile(f, pod, cgroupV2SwapLimitFile)
@@ -251,4 +243,11 @@ func isLimitedSwap(f *framework.Framework, pod *v1.Pod) bool {
 	framework.ExpectNoError(err, "cannot get kubelet config")
 
 	return kubeletCfg.MemorySwap.SwapBehavior == types.LimitedSwap
+}
+
+func isNoSwap(f *framework.Framework, pod *v1.Pod) bool {
+	kubeletCfg, err := getCurrentKubeletConfig(context.Background())
+	framework.ExpectNoError(err, "cannot get kubelet config")
+
+	return kubeletCfg.MemorySwap.SwapBehavior == types.NoSwap || kubeletCfg.MemorySwap.SwapBehavior == ""
 }
