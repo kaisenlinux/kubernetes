@@ -55,9 +55,16 @@ var (
 	// NOTE: The $Format strings are replaced during 'git archive' thanks to the
 	// companion .gitattributes file containing 'export-subst' in this same
 	// directory.  See also https://git-scm.com/docs/gitattributes
-	gitVersion   = "v0.0.0-master+7c48c2bd72b9bf5c44d21d7338cc7bea77d0ad2a"
-	gitCommit    = "7c48c2bd72b9bf5c44d21d7338cc7bea77d0ad2a" // sha1 from git, output of $(git rev-parse HEAD)
+	gitVersion   = "v0.0.0-master+5864a4677267e6adeae276ad85882a8714d69d9d"
+	gitCommit    = "5864a4677267e6adeae276ad85882a8714d69d9d" // sha1 from git, output of $(git rev-parse HEAD)
 	gitTreeState = ""            // state of git tree, either "clean" or "dirty"
 
 	buildDate = "1970-01-01T00:00:00Z" // build date in ISO8601 format, output of $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+)
+
+const (
+	// DefaultKubeBinaryVersion is the hard coded k8 binary version based on the latest K8s release.
+	// It is supposed to be consistent with gitMajor and gitMinor, except for local tests, where gitMajor and gitMinor are "".
+	// Should update for each minor release!
+	DefaultKubeBinaryVersion = "1.31"
 )

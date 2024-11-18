@@ -1,3 +1,11 @@
+kubernetes (1.31.2-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.31.2 release
+  * Bump the golang-go version required to build
+  * Bump the Standards-Version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 19 Nov 2024 00:30:06 +0100
+
 kubernetes (1.30.0-1kaisen) kaisen-packages; urgency=medium
 
   * Import the Kubernetes 1.30.0 release
