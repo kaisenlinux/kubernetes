@@ -1,5 +1,0 @@
-_output/bin/kube-apiserver usr/bin/
-_output/bin/kube-scheduler usr/bin/
-_output/bin/kube-controller-manager usr/bin/
-_output/bin/kubeadm usr/bin/
-_output/bin/kube-aggregator usr/bin/
