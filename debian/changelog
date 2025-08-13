@@ -1,0 +1,164 @@
+kubernetes (1.33.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.33.3 release
+  * Bump the golang-go version required to build
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sat, 09 Aug 2025 17:33:41 +0100
+
+kubernetes (1.31.2-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.31.2 release
+  * Bump the golang-go version required to build
+  * Bump the Standards-Version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 19 Nov 2024 00:30:06 +0100
+
+kubernetes (1.30.0-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.30.0 release
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 07 May 2023 21:46:18 +0100
+
+kubernetes (1.28.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the Kubernetes 1.28.3 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 30 Oct 2023 15:37:04 +0100
+
+kubernetes (1.27.4-2kaisen) kaisen-packages; urgency=medium
+
+  * Remove golang-go as package dependancy
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 07 Aug 2023 19:19:41 +0100
+
+kubernetes (1.27.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.27.4 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sat, 22 Jul 2023 17:45:14 +0100
+
+kubernetes (1.25.9-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.9 version
+  * Execution of make all instead of make to build kubernetes
+  * Add the make genman, gendoc and genkubedocs instructions
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 09 May 2023 10:06:49 +0100
+
+kubernetes (1.25.8-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.8 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 19 Mar 2023 19:36:14 +0100
+
+kubernetes (1.25.5-2kaisen) kaisen-packages; urgency=medium
+
+  * Packaging improvements
+  * No installation of kubeadm by the kubernetes-worker package
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 23 Jan 2022 01:23:37 +0100
+
+kubernetes (1.25.5-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.5 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Thu, 08 Dec 2022 23:13:46 +0100
+
+kubernetes (1.25.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.4 version
+  * Update the golang-go version required
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Wed, 23 Nov 2022 16:05:31 +0100
+
+kubernetes (1.25.1-1kaisen) kaisen-packages; urgency=medium
+
+  * Import the 1.25.1 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 19 Sep 2022 16:41:11 +0100
+
+kubernetes (1.24.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.24.3 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 14 Aug 2022 17:35:26 +0100
+
+kubernetes (1.24.2-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.24.2 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Fri, 08 Jul 2022 02:47:52 +0100
+
+kubernetes (1.24.1-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.24.1 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 29 May 2022 21:51:09 +0100
+
+kubernetes (1.23.5-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.5 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Tue, 29 Mar 2022 23:07:21 +0100
+
+kubernetes (1.23.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.4 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 27 Feb 2022 17:09:56 +0100
+
+kubernetes (1.23.3-2kaisen) kaisen-packages; urgency=medium
+
+  * Add new tools as suggests
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 14 Feb 2022 11:13:32 +0100
+
+kubernetes (1.23.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.3 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 13 Feb 2022 16:01:11 +0100
+
+kubernetes (1.23.2-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.2 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 23 Jan 2022 17:08:57 +0100
+
+kubernetes (1.23.1-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.1 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sun, 09 Jan 2022 03:10:21 +0100
+
+kubernetes (1.23.0-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.23.0 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sat, 11 Dec 2021 12:12:14 +0100
+
+kubernetes (1.22.4-1kaisen) kaisen-packages; urgency=medium
+
+  * Import 1.22.4 version
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 22 Nov 2021 14:10:38 +0200
+
+kubernetes (1.22.3-2kaisen) kaisen-packages; urgency=medium
+
+  * kubernetes-node now called kubernetes-worker
+  * Deletion of kubernetes-client.bash-completion file
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Mon, 08 Nov 2021 15:30:44 +0200
+
+kubernetes (1.22.3-1kaisen) kaisen-packages; urgency=medium
+
+  * Import new upstream release
+  * Fix kubectl bash completion
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Wed, 03 Nov 2021 00:26:32 +0200
+
+kubernetes (1.22.2-1kaisen) kaisen-packages; urgency=medium
+
+  * First packaging for Kaisen Linux
+
+ -- Kevin Chevreuil - Kaisen <kaisen@kaisenlinux.org>  Sat, 25 Sep 2021 01:31:56 +0200
